@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "社員カレンダー",
+    "slug": "employee-calendar",
+    "version": "1.0.0",
+    "sdkVersion": "54.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#3B82F6"
+    },
+    "ios": {
+      "supportsTablet": false
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#3B82F6"
+      },
+      "package": "com.kentaro369.employeecalendar"
+    },
+    "plugins": [
+      "@react-native-community/datetimepicker",
+      "expo-asset"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "983e175a-6429-4999-9f81-036bea42ee59"
+      }
+    }
+  }
+}

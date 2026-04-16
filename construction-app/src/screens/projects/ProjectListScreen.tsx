@@ -53,7 +53,7 @@ export default function ProjectListScreen({ navigation }: Props) {
     try {
       const { data, error } = await supabase
         .from('projects')
-        .select('*, members:project_members(user_id, profile:profiles!project_members_user_id_fkey(full_name))')
+        .select('*, created_by, members:project_members(user_id, profile:profiles!project_members_user_id_fkey(full_name))')
         .order('updated_at', { ascending: false });
       if (error) throw error;
       setAllProjects(data ?? []);
@@ -152,12 +152,13 @@ export default function ProjectListScreen({ navigation }: Props) {
       if (!hit) return false;
     }
     if (filterMyOnly) {
-      const isMember = (p.members ?? []).some((m: any) => m.user_id === profile?.id);
+      const isMember = (p.members ?? []).some((m: any) => m.user_id === profile?.id) || p.created_by === profile?.id;
       if (!isMember) return false;
     }
     if (filterStatuses.length > 0 && !filterStatuses.includes(p.status)) return false;
     if (filterMembers.length > 0) {
       const memberIds = (p.members ?? []).map((m: any) => m.user_id);
+      if (p.created_by) memberIds.push(p.created_by);
       if (!filterMembers.some((id) => memberIds.includes(id))) return false;
     }
     return true;

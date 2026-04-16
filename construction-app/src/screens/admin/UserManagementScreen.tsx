@@ -23,27 +23,56 @@ export default function UserManagementScreen() {
   const [users, setUsers] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // 追加モーダル
   const [addVisible, setAddVisible] = useState(false);
   const [form, setForm] = useState({ full_name: '', email: '', password: '', role: 'employee' as Role });
   const [saving, setSaving] = useState(false);
+
+  // 編集モーダル
+  const [editTarget, setEditTarget] = useState<Profile | null>(null);
+  const [editForm, setEditForm] = useState({ full_name: '', role: 'employee' as Role });
+  const [editSaving, setEditSaving] = useState(false);
 
   const fetchUsers = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('profiles').select('*')
-        .eq('company_id', profile?.company_id)
         .order('created_at', { ascending: true });
       if (error) throw error;
       setUsers(data as Profile[]);
     } catch {
       Alert.alert('エラー', 'ユーザーの取得に失敗しました');
     }
-  }, [profile]);
+  }, []);
 
   useFocusEffect(useCallback(() => {
     setLoading(true);
     fetchUsers().finally(() => setLoading(false));
   }, [fetchUsers]));
+
+  const openEdit = (target: Profile) => {
+    setEditTarget(target);
+    setEditForm({ full_name: target.full_name, role: (target.role as Role) ?? 'employee' });
+  };
+
+  const handleEdit = async () => {
+    if (!editTarget) return;
+    if (!editForm.full_name.trim()) { alert('名前を入力してください'); return; }
+    setEditSaving(true);
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ full_name: editForm.full_name.trim(), role: editForm.role })
+        .eq('id', editTarget.id);
+      if (error) throw error;
+      setEditTarget(null);
+      fetchUsers();
+      alert('メンバー情報を更新しました');
+    } catch (e: any) {
+      alert('エラー: ' + e.message);
+    } finally { setEditSaving(false); }
+  };
 
   const deleteUser = (target: Profile) => {
     if (target.id === profile?.id) { Alert.alert('エラー', '自分自身は削除できません'); return; }
@@ -125,11 +154,16 @@ export default function UserManagementScreen() {
                 <Text style={styles.userEmail}>{item.email}</Text>
                 <Badge role={item.role} />
               </View>
-              {item.id !== profile?.id && (
-                <TouchableOpacity style={styles.deleteBtn} onPress={() => deleteUser(item)}>
-                  <Text style={styles.deleteBtnText}>削除</Text>
+              <View style={styles.actionBtns}>
+                <TouchableOpacity style={styles.editBtn} onPress={() => openEdit(item)}>
+                  <Text style={styles.editBtnText}>編集</Text>
                 </TouchableOpacity>
-              )}
+                {item.id !== profile?.id && (
+                  <TouchableOpacity style={styles.deleteBtn} onPress={() => deleteUser(item)}>
+                    <Text style={styles.deleteBtnText}>削除</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
           </Card>
         )}
@@ -148,32 +182,65 @@ export default function UserManagementScreen() {
                 {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveBtnText}>追加</Text>}
               </TouchableOpacity>
             </View>
-
             <ScrollView contentContainerStyle={styles.sheetBody} keyboardShouldPersistTaps="handled">
               <Text style={styles.label}>名前 <Text style={styles.req}>必須</Text></Text>
               <TextInput style={styles.input} value={form.full_name} onChangeText={v => setForm(f => ({ ...f, full_name: v }))} placeholder="例：山田 太郎" />
-
               <Text style={styles.label}>メールアドレス <Text style={styles.req}>必須</Text></Text>
               <TextInput style={styles.input} value={form.email} onChangeText={v => setForm(f => ({ ...f, email: v }))} placeholder="example@email.com" keyboardType="email-address" autoCapitalize="none" />
-
               <Text style={styles.label}>パスワード <Text style={styles.req}>必須（6文字以上）</Text></Text>
               <TextInput style={styles.input} value={form.password} onChangeText={v => setForm(f => ({ ...f, password: v }))} placeholder="6文字以上" secureTextEntry />
-
               <Text style={styles.label}>権限</Text>
               <View style={styles.roleRow}>
                 {ROLES.map(r => (
                   <TouchableOpacity key={r}
                     style={[styles.roleChip, form.role === r && styles.roleChipActive]}
                     onPress={() => setForm(f => ({ ...f, role: r }))}>
-                    <Text style={[styles.roleChipText, form.role === r && styles.roleChipTextActive]}>
-                      {ROLE_NAMES[r]}
-                    </Text>
+                    <Text style={[styles.roleChipText, form.role === r && styles.roleChipTextActive]}>{ROLE_NAMES[r]}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
-
               <View style={styles.note}>
                 <Text style={styles.noteText}>追加後、そのメールアドレスとパスワードでログインできます。</Text>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* メンバー編集モーダル */}
+      <Modal visible={!!editTarget} transparent animationType="slide">
+        <View style={styles.overlay}>
+          <View style={styles.sheet}>
+            <View style={styles.sheetHeader}>
+              <TouchableOpacity onPress={() => setEditTarget(null)} style={styles.closeBtn}>
+                <Text style={styles.closeBtnText}>✕</Text>
+              </TouchableOpacity>
+              <Text style={styles.sheetTitle}>メンバーを編集</Text>
+              <TouchableOpacity onPress={handleEdit} style={styles.saveBtn} disabled={editSaving}>
+                {editSaving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveBtnText}>保存</Text>}
+              </TouchableOpacity>
+            </View>
+            <ScrollView contentContainerStyle={styles.sheetBody} keyboardShouldPersistTaps="handled">
+              <View style={styles.emailDisplay}>
+                <Text style={styles.emailLabel}>メールアドレス</Text>
+                <Text style={styles.emailValue}>{editTarget?.email}</Text>
+              </View>
+              <Text style={styles.label}>名前 <Text style={styles.req}>必須</Text></Text>
+              <TextInput
+                style={styles.input}
+                value={editForm.full_name}
+                onChangeText={v => setEditForm(f => ({ ...f, full_name: v }))}
+                placeholder="例：山田 太郎"
+              />
+              <Text style={styles.label}>権限</Text>
+              <View style={styles.roleRow}>
+                {ROLES.map(r => (
+                  <TouchableOpacity key={r}
+                    style={[styles.roleChip, editForm.role === r && styles.roleChipActive]}
+                    onPress={() => setEditForm(f => ({ ...f, role: r }))}>
+                    <Text style={[styles.roleChipText, editForm.role === r && styles.roleChipTextActive]}>{ROLE_NAMES[r]}</Text>
+                  </TouchableOpacity>
+                ))}
               </View>
             </ScrollView>
           </View>
@@ -200,6 +267,9 @@ const styles = StyleSheet.create({
   meBadge: { backgroundColor: '#e0f2fe', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 10 },
   meBadgeText: { fontSize: 11, fontWeight: '700', color: '#0369a1' },
   userEmail: { fontSize: 13, color: '#9ca3af' },
+  actionBtns: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  editBtn: { paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#e0f2fe', borderRadius: 8 },
+  editBtnText: { color: '#1a56db', fontSize: 13, fontWeight: '700' },
   deleteBtn: { paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#fde8e8', borderRadius: 8 },
   deleteBtnText: { color: '#c81e1e', fontSize: 13, fontWeight: '700' },
 
@@ -222,4 +292,7 @@ const styles = StyleSheet.create({
   roleChipTextActive: { color: '#fff', fontWeight: '800' },
   note: { marginTop: 24, backgroundColor: '#f0fdf4', borderRadius: 12, padding: 14 },
   noteText: { fontSize: 13, color: '#166534', lineHeight: 20 },
+  emailDisplay: { backgroundColor: '#f8fafc', borderRadius: 12, padding: 14, marginTop: 8 },
+  emailLabel: { fontSize: 12, color: '#94a3b8', marginBottom: 4 },
+  emailValue: { fontSize: 15, fontWeight: '600', color: '#334155' },
 });

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Modal, TextInput, Alert, Image, ActivityIndicator,
@@ -6,154 +6,16 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import WebView from 'react-native-webview';
 import { supabase } from '../lib/supabase';
-
-const SPEECH_HTML = `
-<!DOCTYPE html>
-<html>
-<head>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-  * { box-sizing:border-box; margin:0; padding:0; }
-  body { display:flex; flex-direction:column; align-items:center; justify-content:space-between;
-         height:100vh; background:#1a56db; font-family:sans-serif; color:#fff; padding:40px 24px 48px; }
-  .top { display:flex; flex-direction:column; align-items:center; }
-  .icon { font-size:72px; margin-bottom:16px; }
-  .status { font-size:20px; font-weight:bold; margin-bottom:8px; }
-  .pulse { animation: pulse 1.2s infinite; }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
-  .textbox { width:100%; background:rgba(255,255,255,0.15); border-radius:16px;
-             padding:16px; min-height:120px; font-size:18px; line-height:1.6;
-             text-align:center; word-break:break-all; color:#fff; margin-top:16px; }
-  .textbox.empty { color:rgba(255,255,255,0.5); font-size:15px; }
-  .btnRow { display:flex; gap:16px; width:100%; }
-  .btn { flex:1; padding:16px; border-radius:30px; border:none; font-size:17px;
-         font-weight:bold; cursor:pointer; }
-  .btnRetry { background:rgba(255,255,255,0.25); color:#fff; }
-  .btnConfirm { background:#fff; color:#1a56db; }
-  .btnClose { background:rgba(255,255,255,0.15); color:#fff; font-size:15px;
-              padding:12px 32px; border-radius:30px; border:none; cursor:pointer; }
-  .hidden { display:none; }
-</style>
-</head>
-<body>
-<div class="top">
-  <div class="icon pulse" id="icon">🎤</div>
-  <div class="status" id="status">話してください...</div>
-  <div class="textbox empty" id="textbox">認識したテキストがここに表示されます</div>
-</div>
-
-<div style="display:flex;flex-direction:column;align-items:center;gap:16px;width:100%">
-  <div class="btnRow hidden" id="actionBtns">
-    <button class="btn btnRetry" onclick="retry()">🔄 もう一度</button>
-    <button class="btn btnConfirm" onclick="confirm()">✓ 確定</button>
-  </div>
-  <button class="btnClose" onclick="closeMe()">✕ 閉じる</button>
-</div>
-
-<script>
-  var recognition;
-  var finalText = '';
-
-  function setRecording(active) {
-    var icon = document.getElementById('icon');
-    if (active) {
-      icon.classList.add('pulse');
-      document.getElementById('status').textContent = '話してください...';
-      document.getElementById('actionBtns').classList.add('hidden');
-    } else {
-      icon.classList.remove('pulse');
-    }
-  }
-
-  function updateText(text, interim) {
-    var box = document.getElementById('textbox');
-    var display = text || interim;
-    if (display) {
-      box.textContent = display;
-      box.classList.remove('empty');
-    } else {
-      box.textContent = '認識したテキストがここに表示されます';
-      box.classList.add('empty');
-    }
-  }
-
-  function start() {
-    finalText = '';
-    updateText('', '');
-    setRecording(true);
-
-    var R = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!R) {
-      document.getElementById('status').textContent = '音声認識非対応';
-      return;
-    }
-    recognition = new R();
-    recognition.lang = 'ja-JP';
-    recognition.continuous = false;
-    recognition.interimResults = true;
-
-    recognition.onresult = function(e) {
-      var interim = '';
-      for (var i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
-        else interim += e.results[i][0].transcript;
-      }
-      updateText(finalText, interim);
-    };
-
-    recognition.onend = function() {
-      setRecording(false);
-      if (finalText) {
-        document.getElementById('status').textContent = '認識完了';
-        document.getElementById('actionBtns').classList.remove('hidden');
-      } else {
-        document.getElementById('status').textContent = '認識できませんでした';
-        document.getElementById('actionBtns').classList.remove('hidden');
-      }
-    };
-
-    recognition.onerror = function(e) {
-      setRecording(false);
-      document.getElementById('status').textContent = 'エラー: ' + e.error;
-      window.ReactNativeWebView.postMessage(JSON.stringify({type:'error',error:e.error}));
-    };
-
-    recognition.start();
-  }
-
-  function retry() {
-    start();
-  }
-
-  function confirm() {
-    if (finalText) {
-      window.ReactNativeWebView.postMessage(JSON.stringify({type:'result',text:finalText}));
-    } else {
-      closeMe();
-    }
-  }
-
-  function closeMe() {
-    if (recognition) try { recognition.stop(); } catch(e) {}
-    window.ReactNativeWebView.postMessage(JSON.stringify({type:'close'}));
-  }
-
-  window.onload = start;
-</script>
-</body>
-</html>
-`;
 
 const REPORT_TYPES = ['現場調査報告', '開始報告', '進捗報告', '終了報告'] as const;
 type ReportType = typeof REPORT_TYPES[number];
 
-const TYPE_COLOR: Record<ReportType, string> = {
-  '現場調査報告': '#6b7280',
-  '開始報告':     '#1a56db',
-  '進捗報告':     '#e3a008',
-  '終了報告':     '#057a55',
+const TYPE_META: Record<ReportType, { color: string; icon: string }> = {
+  '現場調査報告': { color: '#6b7280', icon: '🔍' },
+  '開始報告':     { color: '#1a56db', icon: '🚀' },
+  '進捗報告':     { color: '#d97706', icon: '📊' },
+  '終了報告':     { color: '#059669', icon: '✅' },
 };
 
 interface Report {
@@ -165,10 +27,7 @@ interface Report {
   reporter_name?: string;
 }
 
-interface Props {
-  projectId: string;
-  userId: string;
-}
+interface Props { projectId: string; userId: string; }
 
 export default function ReportTab({ projectId, userId }: Props) {
   const [reports, setReports] = useState<Report[]>([]);
@@ -178,7 +37,7 @@ export default function ReportTab({ projectId, userId }: Props) {
   const [content, setContent] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const [voiceVisible, setVoiceVisible] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const fetchReports = useCallback(async () => {
     try {
@@ -188,34 +47,19 @@ export default function ReportTab({ projectId, userId }: Props) {
         .select('id, report_type, content, photos, created_at, created_by')
         .eq('project_id', projectId)
         .order('created_at', { ascending: false });
-
-      if (error) {
-        console.warn('fetchReports error:', error.message);
-        setReports([]);
-        return;
-      }
-
-      // プロファイル名を個別取得
+      if (error) { setReports([]); return; }
       const rows: Report[] = [];
       for (const row of (data ?? [])) {
         let name = '';
         if (row.created_by) {
-          const { data: p } = await supabase
-            .from('profiles')
-            .select('full_name')
-            .eq('id', row.created_by)
-            .single();
+          const { data: p } = await supabase.from('profiles').select('full_name').eq('id', row.created_by).single();
           name = p?.full_name ?? '';
         }
         rows.push({ ...row, reporter_name: name });
       }
       setReports(rows);
-    } catch (e) {
-      console.warn('fetchReports exception:', e);
-      setReports([]);
-    } finally {
-      setLoading(false);
-    }
+    } catch { setReports([]); }
+    finally { setLoading(false); }
   }, [projectId]);
 
   useEffect(() => { fetchReports(); }, [fetchReports]);
@@ -229,54 +73,42 @@ export default function ReportTab({ projectId, userId }: Props) {
 
   const pickImage = () => {
     Alert.alert('写真を追加', '', [
-      {
-        text: 'カメラ', onPress: async () => {
-          const perm = await ImagePicker.requestCameraPermissionsAsync();
-          if (!perm.granted) { Alert.alert('カメラの許可が必要です'); return; }
-          const result = await ImagePicker.launchCameraAsync({ quality: 1.0 });
-          if (!result.canceled && result.assets[0]) {
-            const a = result.assets[0];
+      { text: 'カメラ', onPress: async () => {
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perm.granted) { Alert.alert('カメラの許可が必要です'); return; }
+        const result = await ImagePicker.launchCameraAsync({ quality: 1.0 });
+        if (!result.canceled && result.assets[0]) {
+          const a = result.assets[0];
+          const m = await ImageManipulator.manipulateAsync(a.uri, [{ resize: { width: Math.min(a.width ?? 1920, 1920) } }], { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG });
+          setPhotos(prev => [...prev, m.uri]);
+        }
+      }},
+      { text: 'ギャラリー', onPress: async () => {
+        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perm.granted) { Alert.alert('ギャラリーの許可が必要です'); return; }
+        const result = await ImagePicker.launchImageLibraryAsync({ quality: 1.0, allowsMultipleSelection: true, selectionLimit: 5 });
+        if (!result.canceled) {
+          const uris: string[] = [];
+          for (const a of result.assets) {
             const m = await ImageManipulator.manipulateAsync(a.uri, [{ resize: { width: Math.min(a.width ?? 1920, 1920) } }], { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG });
-            setPhotos(prev => [...prev, m.uri]);
+            uris.push(m.uri);
           }
-        },
-      },
-      {
-        text: 'ギャラリー', onPress: async () => {
-          const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-          if (!perm.granted) { Alert.alert('ギャラリーの許可が必要です'); return; }
-          const result = await ImagePicker.launchImageLibraryAsync({
-            quality: 1.0, allowsMultipleSelection: true, selectionLimit: 5,
-          });
-          if (!result.canceled) {
-            const uris: string[] = [];
-            for (const a of result.assets) {
-              const m = await ImageManipulator.manipulateAsync(a.uri, [{ resize: { width: Math.min(a.width ?? 1920, 1920) } }], { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG });
-              uris.push(m.uri);
-            }
-            setPhotos(prev => [...prev, ...uris]);
-          }
-        },
-      },
+          setPhotos(prev => [...prev, ...uris]);
+        }
+      }},
       { text: 'キャンセル', style: 'cancel' },
     ]);
   };
 
   const uploadPhoto = async (uri: string): Promise<string | null> => {
     try {
-      const ext = 'jpg';
-      const path = `${projectId}/${Date.now()}.${ext}`;
+      const path = `${projectId}/${Date.now()}.jpg`;
       const formData = new FormData();
-      formData.append('file', { uri, name: `photo.${ext}`, type: 'image/jpeg' } as any);
-      const { error } = await supabase.storage
-        .from('report-photos')
-        .upload(path, formData, { contentType: 'multipart/form-data' });
+      formData.append('file', { uri, name: 'photo.jpg', type: 'image/jpeg' } as any);
+      const { error } = await supabase.storage.from('report-photos').upload(path, formData, { contentType: 'multipart/form-data' });
       if (error) return null;
-      const { data } = supabase.storage.from('report-photos').getPublicUrl(path);
-      return data.publicUrl;
-    } catch {
-      return null;
-    }
+      return supabase.storage.from('report-photos').getPublicUrl(path).data.publicUrl;
+    } catch { return null; }
   };
 
   const submit = async () => {
@@ -288,8 +120,7 @@ export default function ReportTab({ projectId, userId }: Props) {
         if (url) uploadedUrls.push(url);
       }
       const { error } = await supabase.from('project_reports').insert({
-        project_id: projectId,
-        report_type: reportType,
+        project_id: projectId, report_type: reportType,
         content: content.trim() || null,
         photos: uploadedUrls.length > 0 ? uploadedUrls : null,
         created_by: userId || null,
@@ -299,136 +130,154 @@ export default function ReportTab({ projectId, userId }: Props) {
       fetchReports();
     } catch (e: any) {
       Alert.alert('エラー', e.message ?? '送信に失敗しました');
-    } finally {
-      setSubmitting(false);
-    }
+    } finally { setSubmitting(false); }
   };
 
   const formatDate = (iso: string) => {
     try {
       const d = new Date(iso);
-      return `${d.getMonth() + 1}/${d.getDate()}`;
+      return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
     } catch { return ''; }
   };
 
   return (
     <View style={styles.container}>
+      {/* ヘッダー */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>報告一覧</Text>
+        <View>
+          <Text style={styles.headerTitle}>報告一覧</Text>
+          {reports.length > 0 && <Text style={styles.headerSub}>{reports.length}件の報告</Text>}
+        </View>
         <TouchableOpacity style={styles.addBtn} onPress={openModal}>
-          <Text style={styles.addBtnText}>＋ 追加</Text>
+          <Text style={styles.addBtnText}>＋ 報告を追加</Text>
         </TouchableOpacity>
       </View>
 
       {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color="#1a56db" />
-        </View>
+        <View style={styles.center}><ActivityIndicator size="large" color="#1a56db" /></View>
       ) : reports.length === 0 ? (
         <View style={styles.center}>
           <Text style={styles.emptyIcon}>📋</Text>
           <Text style={styles.emptyText}>報告がありません</Text>
-          <Text style={styles.emptySub}>＋追加から報告を作成してください</Text>
+          <Text style={styles.emptySub}>＋ 報告を追加から作成してください</Text>
+          <TouchableOpacity style={styles.emptyBtn} onPress={openModal}>
+            <Text style={styles.emptyBtnText}>最初の報告を追加</Text>
+          </TouchableOpacity>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ padding: 16 }}>
+        <ScrollView contentContainerStyle={styles.listContent}>
           {reports.map(item => {
-            const color = TYPE_COLOR[item.report_type as ReportType] ?? '#6b7280';
+            const meta = TYPE_META[item.report_type as ReportType] ?? { color: '#6b7280', icon: '📋' };
+            const isExpanded = expandedId === item.id;
             return (
-              <View key={item.id} style={styles.card}>
-                <View style={styles.cardHeader}>
-                  <View style={[styles.typeBadge, { backgroundColor: color + '22' }]}>
-                    <Text style={[styles.typeText, { color }]}>{item.report_type}</Text>
+              <TouchableOpacity
+                key={item.id}
+                style={[styles.card, { borderLeftColor: meta.color }]}
+                onPress={() => setExpandedId(isExpanded ? null : item.id)}
+                activeOpacity={0.85}
+              >
+                {/* カードヘッダー */}
+                <View style={styles.cardTop}>
+                  <View style={[styles.typeBadge, { backgroundColor: meta.color + '18' }]}>
+                    <Text style={styles.typeIcon}>{meta.icon}</Text>
+                    <Text style={[styles.typeText, { color: meta.color }]}>{item.report_type}</Text>
                   </View>
-                  <Text style={styles.metaText}>
-                    {formatDate(item.created_at)}{item.reporter_name ? `　${item.reporter_name}` : ''}
-                  </Text>
+                  <View style={styles.cardMeta}>
+                    <Text style={styles.metaDate}>{formatDate(item.created_at)}</Text>
+                    {item.reporter_name ? <Text style={styles.metaName}>👤 {item.reporter_name}</Text> : null}
+                  </View>
                 </View>
+
+                {/* 内容プレビュー */}
                 {item.content ? (
-                  <Text style={styles.contentText} numberOfLines={2}>{item.content}</Text>
+                  <Text style={styles.contentText} numberOfLines={isExpanded ? undefined : 2}>
+                    {item.content}
+                  </Text>
                 ) : null}
+
+                {/* 写真サムネイル */}
                 {item.photos && item.photos.length > 0 && (
                   <View style={styles.photoRow}>
-                    {item.photos.slice(0, 3).map((url, i) => (
+                    {item.photos.slice(0, isExpanded ? 99 : 3).map((url, i) => (
                       <Image key={i} source={{ uri: url }} style={styles.thumb} />
                     ))}
-                    {item.photos.length > 3 && (
+                    {!isExpanded && item.photos.length > 3 && (
                       <View style={styles.moreBox}>
                         <Text style={styles.moreText}>+{item.photos.length - 3}</Text>
                       </View>
                     )}
                   </View>
                 )}
-              </View>
+
+                {/* 展開インジケーター */}
+                <Text style={styles.expandHint}>{isExpanded ? '▲ 折りたたむ' : '▼ 展開'}</Text>
+              </TouchableOpacity>
             );
           })}
+          <View style={{ height: 40 }} />
         </ScrollView>
       )}
 
       {/* 追加モーダル */}
       <Modal visible={modalVisible} transparent animationType="slide">
-        <KeyboardAvoidingView
-          style={styles.overlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <View style={styles.modalBox}>
+        <KeyboardAvoidingView style={styles.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={styles.sheet}>
+            <View style={styles.sheetHandle} />
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>報告を追加</Text>
               <TouchableOpacity onPress={() => setModalVisible(false)} style={styles.closeBtn}>
                 <Text style={styles.closeBtnText}>✕</Text>
               </TouchableOpacity>
+              <Text style={styles.modalTitle}>報告を追加</Text>
+              <TouchableOpacity
+                style={[styles.submitBtnSmall, submitting && { opacity: 0.6 }]}
+                onPress={submit} disabled={submitting}
+              >
+                {submitting
+                  ? <ActivityIndicator color="#fff" size="small" />
+                  : <Text style={styles.submitBtnSmallText}>送信</Text>}
+              </TouchableOpacity>
             </View>
 
-            <ScrollView keyboardShouldPersistTaps="handled">
-              <Text style={styles.label}>報告種別（必須）</Text>
-              <View style={styles.typeRow}>
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.modalBody}>
+              {/* 報告種別 */}
+              <Text style={styles.label}>報告種別 <Text style={styles.req}>必須</Text></Text>
+              <View style={styles.typeGrid}>
                 {REPORT_TYPES.map(t => {
                   const active = reportType === t;
-                  const c = TYPE_COLOR[t];
+                  const m = TYPE_META[t];
                   return (
                     <TouchableOpacity
                       key={t}
-                      style={[styles.typeChip, active && { backgroundColor: c, borderColor: c }]}
+                      style={[styles.typeChip, active && { backgroundColor: m.color, borderColor: m.color }]}
                       onPress={() => setReportType(t)}
                     >
+                      <Text style={styles.typeChipIcon}>{m.icon}</Text>
                       <Text style={[styles.typeChipText, active && { color: '#fff' }]}>{t}</Text>
                     </TouchableOpacity>
                   );
                 })}
               </View>
 
+              {/* 報告内容 */}
               <Text style={styles.label}>報告内容</Text>
-              <View style={styles.inputRow}>
-                <TextInput
-                  style={[styles.textInput, { flex: 1, marginBottom: 0 }]}
-                  placeholder="報告内容を入力..."
-                  value={content}
-                  onChangeText={setContent}
-                  multiline
-                  numberOfLines={5}
-                  textAlignVertical="top"
-                />
-                <TouchableOpacity style={styles.micBtn} onPress={() => {
-                  Alert.alert(
-                    '音声入力',
-                    '音声入力は本番アプリでご利用いただけます。\n現在はキーボードの🎤マイクボタンをご使用ください。',
-                    [{ text: 'OK' }]
-                  );
-                }}>
-                  <Text style={styles.micIcon}>🎤</Text>
-                </TouchableOpacity>
-              </View>
-              <View style={{ height: 16 }} />
+              <TextInput
+                style={styles.textInput}
+                placeholder="報告内容を入力..."
+                value={content}
+                onChangeText={setContent}
+                multiline
+                numberOfLines={5}
+                textAlignVertical="top"
+              />
 
+              {/* 写真 */}
               <Text style={styles.label}>写真</Text>
               <View style={styles.photoGrid}>
                 {photos.map((uri, i) => (
                   <View key={i} style={styles.photoWrapper}>
                     <Image source={{ uri }} style={styles.photoPreview} />
-                    <TouchableOpacity
-                      style={styles.removeBtn}
-                      onPress={() => setPhotos(prev => prev.filter((_, idx) => idx !== i))}
-                    >
+                    <TouchableOpacity style={styles.removeBtn}
+                      onPress={() => setPhotos(prev => prev.filter((_, idx) => idx !== i))}>
                       <Text style={styles.removeBtnText}>✕</Text>
                     </TouchableOpacity>
                   </View>
@@ -438,109 +287,83 @@ export default function ReportTab({ projectId, userId }: Props) {
                   <Text style={styles.addPhotoText}>写真追加</Text>
                 </TouchableOpacity>
               </View>
-
-              <TouchableOpacity
-                style={[styles.submitBtn, submitting && { opacity: 0.6 }]}
-                onPress={submit}
-                disabled={submitting}
-              >
-                {submitting
-                  ? <ActivityIndicator color="#fff" />
-                  : <Text style={styles.submitBtnText}>送信する</Text>
-                }
-              </TouchableOpacity>
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
-      </Modal>
-      {/* 音声入力モーダル */}
-      <Modal visible={voiceVisible} transparent animationType="slide">
-        <View style={styles.voiceOverlay}>
-          <WebView
-            style={styles.webview}
-            source={{ uri: 'https://employee-calendar-backend-production.up.railway.app/speech' }}
-            originWhitelist={['*']}
-            mediaPlaybackRequiresUserAction={false}
-            allowsInlineMediaPlayback
-            javaScriptEnabled
-            domStorageEnabled
-            allowsProtectedMedia
-            onPermissionRequest={(request: any) => {
-              request.grant(request.resources);
-            }}
-            mediaCapturePermissionGrantType="grant"
-            onMessage={(e) => {
-              try {
-                const msg = JSON.parse(e.nativeEvent.data);
-                if (msg.type === 'result' && msg.text) {
-                  setContent(prev => prev ? prev + '\n' + msg.text : msg.text);
-                  setVoiceVisible(false);
-                } else if (msg.type === 'close') {
-                  setVoiceVisible(false);
-                } else if (msg.type === 'error') {
-                  Alert.alert('音声認識エラー', msg.error ?? '不明なエラー');
-                  setVoiceVisible(false);
-                }
-              } catch {}
-            }}
-          />
-        </View>
       </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9fafb' },
+  container: { flex: 1, backgroundColor: '#f8fafc' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
-  emptyIcon: { fontSize: 48, marginBottom: 12 },
-  emptyText: { fontSize: 17, fontWeight: '700', color: '#374151', marginBottom: 4 },
-  emptySub: { fontSize: 13, color: '#9ca3af', textAlign: 'center' },
+  emptyIcon: { fontSize: 52, marginBottom: 14 },
+  emptyText: { fontSize: 17, fontWeight: '800', color: '#0f172a', marginBottom: 6 },
+  emptySub: { fontSize: 13, color: '#94a3b8', textAlign: 'center', marginBottom: 20 },
+  emptyBtn: { backgroundColor: '#1a56db', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 },
+  emptyBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
 
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#e5e7eb', backgroundColor: '#fff' },
-  headerTitle: { fontSize: 17, fontWeight: '700', color: '#111827' },
-  addBtn: { backgroundColor: '#1a56db', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
-  addBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  header: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 20, paddingVertical: 14,
+    backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e2e8f0',
+  },
+  headerTitle: { fontSize: 17, fontWeight: '800', color: '#0f172a' },
+  headerSub: { fontSize: 12, color: '#94a3b8', marginTop: 2, fontWeight: '500' },
+  addBtn: { backgroundColor: '#1a56db', paddingHorizontal: 16, paddingVertical: 9, borderRadius: 20 },
+  addBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
 
-  card: { backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 10, elevation: 2, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 4 },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  typeBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  listContent: { padding: 16, maxWidth: 760, width: '100%', alignSelf: 'center' as any },
+
+  card: {
+    backgroundColor: '#fff', borderRadius: 14, padding: 16, marginBottom: 12,
+    borderLeftWidth: 4,
+    ...(Platform.OS === 'web' ? { boxShadow: '0 2px 8px rgba(0,0,0,0.06)' } as any : { elevation: 2, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 6 }),
+  },
+  cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 },
+  typeBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
+  typeIcon: { fontSize: 13 },
   typeText: { fontSize: 12, fontWeight: '700' },
-  metaText: { fontSize: 12, color: '#9ca3af' },
-  contentText: { fontSize: 14, color: '#374151', lineHeight: 20, marginBottom: 8 },
-  photoRow: { flexDirection: 'row', gap: 6 },
-  thumb: { width: 60, height: 60, borderRadius: 6 },
-  moreBox: { width: 60, height: 60, borderRadius: 6, backgroundColor: '#f3f4f6', justifyContent: 'center', alignItems: 'center' },
-  moreText: { fontSize: 13, fontWeight: '700', color: '#6b7280' },
+  cardMeta: { alignItems: 'flex-end', gap: 3 },
+  metaDate: { fontSize: 12, color: '#64748b', fontWeight: '600' },
+  metaName: { fontSize: 12, color: '#94a3b8' },
+  contentText: { fontSize: 14, color: '#374151', lineHeight: 21, marginBottom: 10 },
+  photoRow: { flexDirection: 'row', gap: 8, marginBottom: 8, flexWrap: 'wrap' },
+  thumb: { width: 72, height: 72, borderRadius: 8 },
+  moreBox: { width: 72, height: 72, borderRadius: 8, backgroundColor: '#f1f5f9', justifyContent: 'center', alignItems: 'center' },
+  moreText: { fontSize: 14, fontWeight: '800', color: '#64748b' },
+  expandHint: { fontSize: 11, color: '#cbd5e1', textAlign: 'right', marginTop: 4, fontWeight: '600' },
 
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalBox: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '90%' },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  modalTitle: { fontSize: 18, fontWeight: '800', color: '#111827' },
-  closeBtn: { padding: 6 },
-  closeBtnText: { fontSize: 18, color: '#6b7280' },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end', ...(Platform.OS === 'web' ? { alignItems: 'center' } as any : {}) },
+  sheet: {
+    backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '92%',
+    ...(Platform.OS === 'web' ? { borderRadius: 20, width: '100%', maxWidth: 560, marginBottom: 0 } as any : {}),
+  },
+  sheetHandle: { width: 40, height: 4, backgroundColor: '#e2e8f0', borderRadius: 2, alignSelf: 'center', marginTop: 12, marginBottom: 4 },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center' },
+  closeBtnText: { fontSize: 14, color: '#64748b', fontWeight: '700' },
+  modalTitle: { fontSize: 17, fontWeight: '800', color: '#0f172a' },
+  submitBtnSmall: { backgroundColor: '#059669', paddingHorizontal: 18, paddingVertical: 8, borderRadius: 10 },
+  submitBtnSmallText: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  modalBody: { padding: 16, paddingBottom: 48 },
 
-  label: { fontSize: 13, fontWeight: '700', color: '#6b7280', marginBottom: 8 },
-  typeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
-  typeChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1.5, borderColor: '#e5e7eb' },
-  typeChipText: { fontSize: 13, fontWeight: '600', color: '#6b7280' },
+  label: { fontSize: 13, fontWeight: '700', color: '#374151', marginBottom: 8, marginTop: 16 },
+  req: { color: '#ef4444' },
+  typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
+  typeChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, borderWidth: 1.5, borderColor: '#e2e8f0', backgroundColor: '#fff' },
+  typeChipIcon: { fontSize: 14 },
+  typeChipText: { fontSize: 13, fontWeight: '600', color: '#64748b' },
 
-  textInput: { borderWidth: 1.5, borderColor: '#e5e7eb', borderRadius: 10, padding: 12, fontSize: 14, minHeight: 100, marginBottom: 16 },
+  textInput: { borderWidth: 1.5, borderColor: '#e2e8f0', borderRadius: 12, padding: 13, fontSize: 15, minHeight: 120, backgroundColor: '#fafafa', color: '#0f172a' },
 
-  photoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 },
+  photoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 8 },
   photoWrapper: { position: 'relative' },
-  photoPreview: { width: 80, height: 80, borderRadius: 8 },
-  removeBtn: { position: 'absolute', top: -6, right: -6, backgroundColor: '#ef4444', borderRadius: 10, width: 20, height: 20, justifyContent: 'center', alignItems: 'center' },
-  removeBtnText: { color: '#fff', fontSize: 10, fontWeight: '800' },
-  addPhoto: { width: 80, height: 80, borderRadius: 8, borderWidth: 2, borderColor: '#e5e7eb', borderStyle: 'dashed', justifyContent: 'center', alignItems: 'center' },
-  addPhotoIcon: { fontSize: 24, color: '#9ca3af' },
-  addPhotoText: { fontSize: 11, color: '#9ca3af', marginTop: 2 },
-
-  submitBtn: { backgroundColor: '#1a56db', padding: 16, borderRadius: 12, alignItems: 'center', marginBottom: 8 },
-  submitBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  inputRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 16 },
-  micBtn: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#1a56db', justifyContent: 'center', alignItems: 'center', marginTop: 4 },
-  micIcon: { fontSize: 22 },
-  voiceOverlay: { flex: 1, backgroundColor: '#000' },
-  webview: { flex: 1 },
+  photoPreview: { width: 80, height: 80, borderRadius: 10 },
+  removeBtn: { position: 'absolute', top: -6, right: -6, backgroundColor: '#ef4444', borderRadius: 10, width: 22, height: 22, justifyContent: 'center', alignItems: 'center' },
+  removeBtnText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  addPhoto: { width: 80, height: 80, borderRadius: 10, borderWidth: 2, borderColor: '#e2e8f0', borderStyle: 'dashed', justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8fafc' },
+  addPhotoIcon: { fontSize: 26, color: '#94a3b8' },
+  addPhotoText: { fontSize: 11, color: '#94a3b8', marginTop: 3, fontWeight: '600' },
 });

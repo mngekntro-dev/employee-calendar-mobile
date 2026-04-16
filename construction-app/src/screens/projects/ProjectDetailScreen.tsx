@@ -14,19 +14,20 @@ import TaskTab from '../../components/TaskTab';
 import ReportTab from '../../components/ReportTab';
 import { PhotoTab } from '../../components/PhotoTab';
 import LedgerListTab from '../../components/LedgerListTab';
-import PhotoLedgerScreen from './PhotoLedgerScreen';
 
 const AVATAR_COLORS = ['#1a56db', '#059669', '#d97706', '#dc2626', '#7c3aed', '#0891b2'];
-
 const getUserColor = (userId: string) => {
   let hash = 0;
-  for (let i = 0; i < userId.length; i++) {
-    hash = (hash * 31 + userId.charCodeAt(i)) >>> 0;
-  }
+  for (let i = 0; i < userId.length; i++) hash = (hash * 31 + userId.charCodeAt(i)) >>> 0;
   return AVATAR_COLORS[hash % AVATAR_COLORS.length];
 };
+
 const TABS = ['概要', 'タスク', '報告', '写真', 'カレンダー', ...(Platform.OS === 'web' ? ['台帳'] : [])] as const;
 type Tab = typeof TABS[number];
+
+const TAB_ICONS: Record<string, string> = {
+  '概要': '📋', 'タスク': '✅', '報告': '📝', '写真': '📷', 'カレンダー': '📅', '台帳': '📒',
+};
 
 interface Props { route: any; navigation: any; }
 
@@ -67,71 +68,135 @@ export default function ProjectDetailScreen({ route, navigation }: Props) {
 
   const handleDelete = () => {
     if (!isAdmin) return;
+    if (Platform.OS === 'web') {
+      if (!window.confirm(`「${project?.name}」を削除しますか？`)) return;
+      supabase.from('projects').delete().eq('id', projectId).then(({ error }) => {
+        if (error) Alert.alert('エラー', '削除に失敗しました');
+        else navigation.goBack();
+      });
+      return;
+    }
     Alert.alert('案件を削除', `「${project?.name}」を削除しますか？`, [
       { text: 'キャンセル', style: 'cancel' },
-      {
-        text: '削除', style: 'destructive',
-        onPress: async () => {
-          const { error } = await supabase.from('projects').delete().eq('id', projectId);
-          if (error) Alert.alert('エラー', '削除に失敗しました');
-          else navigation.goBack();
-        },
-      },
+      { text: '削除', style: 'destructive', onPress: async () => {
+        const { error } = await supabase.from('projects').delete().eq('id', projectId);
+        if (error) Alert.alert('エラー', '削除に失敗しました');
+        else navigation.goBack();
+      }},
     ]);
   };
 
   const handleCopy = () => {
     Alert.alert('案件をコピー', `「${project?.name}」をコピーして新規作成しますか？`, [
       { text: 'キャンセル', style: 'cancel' },
-      {
-        text: 'コピー',
-        onPress: async () => {
-          if (!project) return;
-          const { data, error } = await supabase.from('projects').insert({
-            name: `${project.name}（コピー）`,
-            description: project.description,
-            status: 'planning',
-            start_date: project.start_date,
-            end_date: project.end_date,
-            company_id: project.company_id,
-            created_by: profile?.id,
-            address: project.address,
-            building_type: project.building_type,
-            parking_info: project.parking_info,
-            work_period: project.work_period,
-            weekend_work: project.weekend_work,
-            smoking_rule: project.smoking_rule,
-            other_notes: project.other_notes,
-            customer_type: project.customer_type,
-            customer_company: project.customer_company,
-            customer_contact: project.customer_contact,
-            customer_phone: project.customer_phone,
-          }).select().single();
-          if (error) Alert.alert('エラー', 'コピーに失敗しました');
-          else {
-            Alert.alert('完了', '案件をコピーしました');
-            navigation.navigate('ProjectDetail', { projectId: data.id });
-          }
-        },
-      },
+      { text: 'コピー', onPress: async () => {
+        if (!project) return;
+        const { data, error } = await supabase.from('projects').insert({
+          name: `${project.name}（コピー）`, description: project.description,
+          status: 'planning', start_date: project.start_date, end_date: project.end_date,
+          company_id: project.company_id, created_by: profile?.id,
+          address: project.address, building_type: project.building_type,
+          parking_info: project.parking_info, work_period: project.work_period,
+          weekend_work: project.weekend_work, smoking_rule: project.smoking_rule,
+          other_notes: project.other_notes, customer_type: project.customer_type,
+          customer_company: project.customer_company, customer_contact: project.customer_contact,
+          customer_phone: project.customer_phone,
+        }).select().single();
+        if (error) Alert.alert('エラー', 'コピーに失敗しました');
+        else { Alert.alert('完了', '案件をコピーしました'); navigation.navigate('ProjectDetail', { projectId: data.id }); }
+      }},
     ]);
   };
 
-  const openMap = (address: string) => {
-    const url = `https://maps.apple.com/?q=${encodeURIComponent(address)}`;
-    Linking.openURL(url);
-  };
-
-  const openNearby = (address: string | null) => {
-    if (!address) return;
-    const url = `https://maps.apple.com/?q=${encodeURIComponent('周辺施設')}&near=${encodeURIComponent(address)}`;
-    Linking.openURL(url);
-  };
+  const openMap = (address: string) =>
+    Linking.openURL(`https://maps.apple.com/?q=${encodeURIComponent(address)}`);
 
   if (loading) return <LoadingOverlay />;
   if (!project) return null;
 
   const statusColor = STATUS_COLOR[project.status];
+
+  const actionButtons = (
+    <View style={styles.actionSection}>
+      {canEdit && (
+        <ActionBtn icon="✏️" label="案件を編集する" color="#1a56db" bg="#eff6ff"
+          onPress={() => navigation.navigate('ProjectForm', { projectId })} />
+      )}
+      {canEdit && (
+        <ActionBtn icon="👥" label="チームメンバー管理" color="#1a56db" bg="#eff6ff"
+          onPress={() => navigation.navigate('TeamMember', { projectId })} />
+      )}
+      <ActionBtn icon="📋" label="案件をコピーする" color="#374151" bg="#f1f5f9" onPress={handleCopy} />
+      {isAdmin && (
+        <ActionBtn icon="🗑️" label="案件を削除する" color="#dc2626" bg="#fef2f2" onPress={handleDelete} />
+      )}
+    </View>
+  );
+
+  const overviewContent = (
+    <>
+      {/* ステータス＋工期カード */}
+      <View style={styles.heroCard}>
+        <View style={styles.heroTop}>
+          <View style={[styles.statusPill, { backgroundColor: statusColor + '22', borderColor: statusColor + '44' }]}>
+            <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
+            <Text style={[styles.statusText, { color: statusColor }]}>{STATUS_LABEL[project.status]}</Text>
+          </View>
+          <View style={styles.avatarRow}>
+            {members.slice(0, 5).map((m, i) => (
+              <View key={m.user_id} style={[styles.avatar, { backgroundColor: getUserColor(m.user_id), marginLeft: i === 0 ? 0 : -10 }]}>
+                <Text style={styles.avatarText}>{(m.profile?.full_name ?? '?')[0]}</Text>
+              </View>
+            ))}
+            {members.length > 5 && (
+              <View style={[styles.avatar, { backgroundColor: '#94a3b8', marginLeft: -10 }]}>
+                <Text style={styles.avatarText}>+{members.length - 5}</Text>
+              </View>
+            )}
+          </View>
+        </View>
+        {(project.start_date || project.end_date) && (
+          <View style={styles.dateRow}>
+            <Text style={styles.dateIcon}>📅</Text>
+            <Text style={styles.dateValue}>{project.start_date ?? '未定'} 〜 {project.end_date ?? '未定'}</Text>
+          </View>
+        )}
+        {project.description ? <Text style={styles.description}>{project.description}</Text> : null}
+      </View>
+
+      <InfoSection title="物件情報" icon="🏠">
+        <InfoRow label="物件名" value={project.name} />
+        {project.address ? (
+          <TouchableOpacity onPress={() => openMap(project.address!)}>
+            <InfoRow label="住所" value={project.address} highlight />
+          </TouchableOpacity>
+        ) : <InfoRow label="住所" value={null} />}
+        <InfoRow label="建物構造" value={project.building_type} last />
+      </InfoSection>
+
+      <InfoSection title="施工に関する注意点" icon="⚠️">
+        <InfoRow label="駐車スペース" value={project.parking_info} />
+        <InfoRow label="工事可能期間" value={project.work_period} />
+        <InfoRow label="土日の工事" value={project.weekend_work} />
+        <InfoRow label="喫煙ルール" value={project.smoking_rule} />
+        <InfoRow label="その他" value={project.other_notes} last />
+      </InfoSection>
+
+      <InfoSection title="顧客情報" icon="👤">
+        <InfoRow label="区分" value={project.customer_type} />
+        <InfoRow label="会社名" value={project.customer_company} />
+        <InfoRow label="担当者名" value={project.customer_contact} />
+        {project.customer_phone ? (
+          <TouchableOpacity onPress={() => Linking.openURL(`tel:${project.customer_phone}`)}>
+            <InfoRow label="電話番号" value={project.customer_phone} highlight last />
+          </TouchableOpacity>
+        ) : <InfoRow label="電話番号" value={null} last />}
+      </InfoSection>
+
+      {/* モバイルのみ：下部にアクションボタン */}
+      {Platform.OS !== 'web' && actionButtons}
+    </>
+  );
 
   const renderOverview = () => (
     <ScrollView
@@ -140,100 +205,18 @@ export default function ProjectDetailScreen({ route, navigation }: Props) {
         setRefreshing(true); await fetchData(); setRefreshing(false);
       }} />}
     >
-      {/* ステータス＋アバター行 */}
-      <View style={styles.statusRow}>
-        <View style={[styles.statusBadge, { backgroundColor: statusColor + '22' }]}>
-          <Text style={[styles.statusText, { color: statusColor }]}>{STATUS_LABEL[project.status]}</Text>
+      {Platform.OS === 'web' ? (
+        <View style={styles.webTwoCol}>
+          {/* 左：アクションサイドバー */}
+          <View style={styles.webSidebar}>
+            <Text style={styles.sidebarHeading}>操作メニュー</Text>
+            {actionButtons}
+          </View>
+          {/* 右：メインコンテンツ */}
+          <View style={styles.webMain}>{overviewContent}</View>
         </View>
-        <View style={styles.avatarRow}>
-          {members.slice(0, 5).map((m, i) => (
-            <View key={m.user_id} style={[styles.avatar, { backgroundColor: getUserColor(m.user_id), marginLeft: i === 0 ? 0 : -8 }]}>
-              <Text style={styles.avatarText}>{(m.profile?.full_name ?? '?')[0]}</Text>
-            </View>
-          ))}
-          {members.length > 5 && (
-            <View style={[styles.avatar, { backgroundColor: '#9ca3af', marginLeft: -8 }]}>
-              <Text style={styles.avatarText}>+{members.length - 5}</Text>
-            </View>
-          )}
-        </View>
-      </View>
-
-      {/* 工期 */}
-      {(project.start_date || project.end_date) && (
-        <View style={styles.dateRow}>
-          <Text style={styles.dateLabel}>📅 工期：</Text>
-          <Text style={styles.dateValue}>
-            {project.start_date ?? '未定'} 〜 {project.end_date ?? '未定'}
-          </Text>
-        </View>
-      )}
-
-      {/* 物件情報 */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>物件情報</Text>
-        <InfoRow label="物件名" value={project.name} />
-        {project.address ? (
-          <TouchableOpacity onPress={() => openMap(project.address!)}>
-            <InfoRow label="住所" value={project.address} highlight />
-          </TouchableOpacity>
-        ) : <InfoRow label="住所" value={null} />}
-
-        <InfoRow label="建物構造" value={project.building_type} />
-      </View>
-
-      {/* 施工に関する注意点 */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>施工に関する注意点</Text>
-        <InfoRow label="駐車スペース" value={project.parking_info} />
-        <InfoRow label="工事可能期間" value={project.work_period} />
-        <InfoRow label="土日の工事" value={project.weekend_work} />
-        <InfoRow label="喫煙ルール" value={project.smoking_rule} />
-        <InfoRow label="その他" value={project.other_notes} />
-      </View>
-
-      {/* 顧客情報 */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>顧客情報</Text>
-        <InfoRow label="区分" value={project.customer_type} />
-        <InfoRow label="会社名" value={project.customer_company} />
-        <InfoRow label="担当者名" value={project.customer_contact} />
-        {project.customer_phone ? (
-          <TouchableOpacity onPress={() => Linking.openURL(`tel:${project.customer_phone}`)}>
-            <InfoRow label="電話番号" value={project.customer_phone} highlight />
-          </TouchableOpacity>
-        ) : <InfoRow label="電話番号" value={null} />}
-      </View>
-
-      {/* アクションボタン */}
-      <View style={styles.section}>
-        {canEdit && (
-          <TouchableOpacity style={styles.editBtn} onPress={() => navigation.navigate('ProjectForm', { projectId })}>
-            <Text style={styles.editBtnText}>✏️ 案件を編集する</Text>
-          </TouchableOpacity>
-        )}
-        {canEdit && (
-          <TouchableOpacity style={styles.editBtn} onPress={() => navigation.navigate('TeamMember', { projectId })}>
-            <Text style={styles.editBtnText}>👥 チームメンバー管理</Text>
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity style={styles.copyBtn} onPress={handleCopy}>
-          <Text style={styles.copyBtnText}>📋 案件をコピーする</Text>
-        </TouchableOpacity>
-        {isAdmin && (
-          <TouchableOpacity style={styles.deleteBtn} onPress={handleDelete}>
-            <Text style={styles.deleteBtnText}>🗑️ 案件を削除する</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+      ) : overviewContent}
     </ScrollView>
-  );
-
-  const renderPlaceholder = (label: string) => (
-    <View style={styles.placeholder}>
-      <Text style={styles.placeholderIcon}>🚧</Text>
-      <Text style={styles.placeholderText}>{label}は近日実装予定です</Text>
-    </View>
   );
 
   return (
@@ -244,178 +227,158 @@ export default function ProjectDetailScreen({ route, navigation }: Props) {
           <Text style={styles.backText}>←</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{project.name}</Text>
-        {canEdit && (
-          <TouchableOpacity onPress={() => navigation.navigate('ProjectForm', { projectId })} style={styles.headerEditBtn}>
-            <Text style={styles.headerEditText}>編集</Text>
-          </TouchableOpacity>
-        )}
-        {(
+        <View style={styles.headerActions}>
+          {canEdit && (
+            <TouchableOpacity
+              style={[styles.headerActionBtn, { backgroundColor: 'rgba(255,255,255,0.2)' }]}
+              onPress={() => navigation.navigate('ProjectForm', { projectId })}
+            >
+              <Text style={styles.headerActionText}>編集</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
-            style={styles.headerChatBtn}
+            style={[styles.headerActionBtn, { backgroundColor: '#059669' }]}
             onPress={async () => {
               try {
                 const roomId = await getOrCreateRoom('project', project.id);
-                navigation.navigate('Chat', {
-                  roomId,
-                  roomType: 'project',
-                  title: `${project.name} チャット`,
-                });
-              } catch {
-                Alert.alert('エラー', 'チャットを開けませんでした');
-              }
+                navigation.navigate('Chat', { roomId, roomType: 'project', title: `${project.name} チャット` });
+              } catch { Alert.alert('エラー', 'チャットを開けませんでした'); }
             }}
           >
-            <Text style={styles.headerChatText}>💬 チャット</Text>
+            <Text style={styles.headerActionText}>💬 チャット</Text>
           </TouchableOpacity>
-        )}
+        </View>
       </View>
 
       {/* タブバー */}
       <View style={styles.tabBar}>
-        {TABS.map(tab => (
-          <TouchableOpacity
-            key={tab}
-            style={[styles.tabItem, activeTab === tab && styles.tabItemActive]}
-            onPress={() => setActiveTab(tab)}
-          >
-            <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>{tab}</Text>
-          </TouchableOpacity>
-        ))}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabBarInner}>
+          {TABS.map(tab => (
+            <TouchableOpacity
+              key={tab}
+              style={[styles.tabItem, activeTab === tab && styles.tabItemActive]}
+              onPress={() => setActiveTab(tab)}
+            >
+              <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
+                {TAB_ICONS[tab]} {tab}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
       </View>
 
       {/* タブコンテンツ */}
       <View style={styles.flex}>
         {activeTab === '概要' && renderOverview()}
         {activeTab === 'タスク' && <TaskTab projectId={projectId} projectName={project.name} members={members} />}
-        {activeTab === '報告' && (
-          <ReportTab projectId={projectId} userId={profile?.id ?? ''} />
-        )}
+        {activeTab === '報告' && <ReportTab projectId={projectId} userId={profile?.id ?? ''} />}
         {activeTab === '写真' && project && <PhotoTab projectId={project.id} projectName={project.name} navigation={navigation} />}
         {activeTab === 'カレンダー' && <ProjectCalendarTab projectId={projectId} projectName={project.name} projectAddress={project.address ?? null} members={members} />}
         {activeTab === '台帳' && <LedgerListTab projectId={project.id} projectName={project.name} navigation={navigation} />}
       </View>
-
     </View>
   );
 }
 
-function InfoRow({ label, value, highlight }: { label: string; value: string | null; highlight?: boolean }) {
+function InfoSection({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) {
   return (
-    <View style={infoStyles.row}>
+    <View style={sectionStyles.wrap}>
+      <View style={sectionStyles.header}>
+        <Text style={sectionStyles.icon}>{icon}</Text>
+        <Text style={sectionStyles.title}>{title}</Text>
+      </View>
+      {children}
+    </View>
+  );
+}
+
+function InfoRow({ label, value, highlight, last }: { label: string; value: string | null | undefined; highlight?: boolean; last?: boolean }) {
+  return (
+    <View style={[infoStyles.row, last && infoStyles.rowLast]}>
       <Text style={infoStyles.label}>{label}</Text>
-      <Text style={[infoStyles.value, highlight && infoStyles.highlight]}>
-        {value ?? '未設定'}
+      <Text style={[infoStyles.value, highlight && infoStyles.highlight]} numberOfLines={highlight ? 1 : undefined}>
+        {value ?? <Text style={infoStyles.empty}>未設定</Text>}
       </Text>
     </View>
   );
 }
 
+function ActionBtn({ icon, label, color, bg, onPress }: { icon: string; label: string; color: string; bg: string; onPress: () => void }) {
+  return (
+    <TouchableOpacity style={[actionStyles.btn, { backgroundColor: bg }]} onPress={onPress}>
+      <Text style={actionStyles.icon}>{icon}</Text>
+      <Text style={[actionStyles.label, { color }]}>{label}</Text>
+      <Text style={[actionStyles.arrow, { color }]}>›</Text>
+    </TouchableOpacity>
+  );
+}
+
+const sectionStyles = StyleSheet.create({
+  wrap: { backgroundColor: '#fff', borderRadius: 16, marginBottom: 12, overflow: 'hidden',
+    ...(Platform.OS === 'web' ? { boxShadow: '0 1px 4px rgba(0,0,0,0.06)' } as any : { elevation: 1 }) },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10, gap: 8, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  icon: { fontSize: 16 },
+  title: { fontSize: 13, fontWeight: '800', color: '#0f172a', textTransform: 'uppercase', letterSpacing: 0.8 },
+});
+
 const infoStyles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
-  },
-  label: { width: 110, fontSize: 14, color: '#9ca3af', fontWeight: '500' },
-  value: { flex: 1, fontSize: 14, color: '#111827' },
+  row: { flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#f8fafc' },
+  rowLast: { borderBottomWidth: 0 },
+  label: { width: 100, fontSize: 13, color: '#94a3b8', fontWeight: '600' },
+  value: { flex: 1, fontSize: 14, color: '#0f172a', fontWeight: '500' },
   highlight: { color: '#1a56db', textDecorationLine: 'underline' },
+  empty: { color: '#cbd5e1', fontStyle: 'italic' },
+});
+
+const actionStyles = StyleSheet.create({
+  btn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderRadius: 14, marginBottom: 8 },
+  icon: { fontSize: 18, marginRight: 12 },
+  label: { flex: 1, fontSize: 15, fontWeight: '700' },
+  arrow: { fontSize: 20, fontWeight: '300' },
 });
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9fafb' },
+  container: { flex: 1, backgroundColor: '#f1f5f9' },
   flex: { flex: 1 },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: 'row', alignItems: 'center',
     backgroundColor: '#1a56db',
-    paddingTop: Platform.OS === 'web' ? 10 : 48,
-    paddingBottom: Platform.OS === 'web' ? 10 : 12,
-    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'web' ? 12 : 50,
+    paddingBottom: 12, paddingHorizontal: 16, gap: 10,
   },
-  backBtn: { marginRight: 8 },
-  backText: { color: '#fff', fontSize: 22 },
-  headerTitle: { flex: 1, color: '#fff', fontSize: 18, fontWeight: '700' },
-  headerEditBtn: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#059669', borderRadius: 8, marginRight: 6 },
-  headerEditText: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  headerChatBtn: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#059669', borderRadius: 8 },
-  headerChatText: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  tabBar: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' },
+  backText: { color: '#fff', fontSize: 20, lineHeight: 22 },
+  headerTitle: { flex: 1, color: '#fff', fontSize: 17, fontWeight: '700', letterSpacing: -0.3 },
+  headerActions: { flexDirection: 'row', gap: 8 },
+  headerActionBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  headerActionText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  tabBar: { backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e2e8f0' },
+  tabBarInner: { paddingHorizontal: 8, gap: 4, flexGrow: 1, justifyContent: 'center' },
+  tabItem: { paddingHorizontal: 14, paddingVertical: 11, borderRadius: 8, marginVertical: 4 },
+  tabItemActive: { backgroundColor: '#eff6ff' },
+  tabText: { fontSize: 13, color: '#94a3b8', fontWeight: '600' },
+  tabTextActive: { color: '#1a56db', fontWeight: '800' },
+  tabContent: { padding: 16, paddingBottom: 32 },
+  tabContentWeb: { maxWidth: 800, alignSelf: 'center' as any, width: '100%' },
+  heroCard: {
+    backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 12,
+    ...(Platform.OS === 'web' ? { boxShadow: '0 1px 4px rgba(0,0,0,0.06)' } as any : { elevation: 1 }),
   },
-  tabItem: { flex: 1, paddingVertical: 12, alignItems: 'center' },
-  tabItemActive: { borderBottomWidth: 2, borderBottomColor: '#1a56db' },
-  tabText: { fontSize: 14, color: '#9ca3af', fontWeight: '600' },
-  tabTextActive: { color: '#1a56db' },
-  tabContent: { padding: 16, paddingBottom: 24 },
-  statusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  statusBadge: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20 },
+  heroTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  statusPill: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, borderWidth: 1, gap: 6 },
+  statusDot: { width: 7, height: 7, borderRadius: 4 },
   statusText: { fontSize: 13, fontWeight: '700' },
   avatarRow: { flexDirection: 'row', alignItems: 'center' },
-  avatar: {
-    width: 32, height: 32, borderRadius: 16,
-    justifyContent: 'center', alignItems: 'center',
-    borderWidth: 2, borderColor: '#fff',
-  },
-  avatarText: { color: '#fff', fontSize: 12, fontWeight: '700' },
-  dateRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
-  dateLabel: { fontSize: 13, color: '#9ca3af' },
-  dateValue: { fontSize: 13, color: '#374151', fontWeight: '600' },
-  section: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#111827',
-    marginBottom: 8,
-    borderLeftWidth: 3,
-    borderLeftColor: '#1a56db',
-    paddingLeft: 8,
-  },
-  nearbyRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8, marginBottom: 4 },
-  nearbyBtn: {
-    paddingHorizontal: 12, paddingVertical: 6,
-    borderRadius: 20, borderWidth: 1, borderColor: '#1a56db',
-    backgroundColor: '#eff6ff',
-  },
-  nearbyText: { fontSize: 12, color: '#1a56db', fontWeight: '600' },
-  editBtn: {
-    padding: 14, borderRadius: 10,
-    backgroundColor: '#eff6ff',
-    alignItems: 'center', marginBottom: 8,
-  },
-  editBtnText: { color: '#1a56db', fontSize: 15, fontWeight: '700' },
-  copyBtn: {
-    padding: 14, borderRadius: 10,
-    backgroundColor: '#f3f4f6',
-    alignItems: 'center', marginBottom: 8,
-  },
-  copyBtnText: { color: '#374151', fontSize: 15, fontWeight: '700' },
-  deleteBtn: {
-    padding: 14, borderRadius: 10,
-    backgroundColor: '#fde8e8',
-    alignItems: 'center',
-  },
-  deleteBtnText: { color: '#c81e1e', fontSize: 15, fontWeight: '700' },
-  chatBtn: {
-    backgroundColor: '#057a55',
-    padding: 16,
-    alignItems: 'center',
-  },
-  chatBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  placeholder: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 100 },
-  placeholderIcon: { fontSize: 48, marginBottom: 12 },
-  placeholderText: { fontSize: 16, color: '#9ca3af' },
+  avatar: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#fff' },
+  avatarText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  dateRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+  dateIcon: { fontSize: 14 },
+  dateValue: { fontSize: 13, color: '#475569', fontWeight: '600' },
+  description: { fontSize: 14, color: '#64748b', lineHeight: 20, marginTop: 4 },
+  actionSection: { marginTop: 4 },
+  webCenter: { maxWidth: 760, width: '100%', alignSelf: 'center' as any },
+  webTwoCol: { flexDirection: 'row', gap: 20, maxWidth: 1100, alignSelf: 'center' as any, width: '100%' },
+  webSidebar: { width: 220, flexShrink: 0 },
+  webMain: { flex: 1, minWidth: 0 },
+  sidebarHeading: { fontSize: 11, fontWeight: '800', color: '#94a3b8', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10, paddingLeft: 4 },
 });

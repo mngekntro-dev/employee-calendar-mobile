@@ -64,11 +64,26 @@ export default function LedgerListTab({ projectId, projectName, navigation }: Pr
       body: JSON.stringify({ title: data.title, subtitle: data.subtitle, rows: apiRows }),
     });
 
-    if (!resp.ok) { window.alert('PDF生成に失敗しました'); return; }
+    if (!resp.ok) { window.alert('PDF生成に失敗しました: ' + resp.status); return; }
+
+    const contentType = resp.headers.get('content-type') ?? '';
+    if (contentType.includes('html')) {
+      // HTMLをBlobで新タブ表示（ブラウザのPDF保存を使用）
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      return;
+    }
 
     const blob = await resp.blob();
     const url = URL.createObjectURL(blob);
-    window.open(url, '_blank');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${data.title || '写真台帳'}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   async function deleteLedger(ledger: Ledger) {
@@ -131,7 +146,7 @@ export default function LedgerListTab({ projectId, projectName, navigation }: Pr
         <FlatList
           data={ledgers}
           keyExtractor={item => item.id}
-          contentContainerStyle={{ padding: 16 }}
+          contentContainerStyle={{ padding: 16, maxWidth: 760, width: '100%', alignSelf: 'center' }}
           renderItem={({ item }) => (
             <View style={styles.card}>
               <View style={styles.cardInfo}>

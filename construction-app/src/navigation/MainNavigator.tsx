@@ -10,6 +10,7 @@ import TeamMemberScreen from '../screens/team/TeamMemberScreen';
 import UserManagementScreen from '../screens/admin/UserManagementScreen';
 import PhotoLedgerScreen from '../screens/projects/PhotoLedgerScreen';
 import ChatScreen from '../screens/projects/ChatScreen';
+import CustomerListScreen from '../screens/projects/CustomerListScreen';
 
 const Tab = createBottomTabNavigator();
 const ProjectStack = createStackNavigator();
@@ -60,6 +61,11 @@ function ProjectStackNavigator() {
         name="UserMgmt"
         component={UserManagementScreen}
         options={{ title: 'メンバー管理' }}
+      />
+      <ProjectStack.Screen
+        name="CustomerList"
+        component={CustomerListScreen}
+        options={{ title: '顧客一覧' }}
       />
     </ProjectStack.Navigator>
   );

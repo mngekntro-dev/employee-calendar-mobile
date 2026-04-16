@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   Alert, RefreshControl, Platform, TextInput, ScrollView,
@@ -10,6 +10,9 @@ import ProjectCard from '../../components/ProjectCard';
 import Button from '../../components/Button';
 import LoadingOverlay from '../../components/LoadingOverlay';
 import { getOrCreateRoom } from '../../lib/chatRoom';
+
+// モジュールスコープ変数（HTML5 DnD廃止・マウスイベント方式）
+let _globalDragId: string | null = null;
 
 const STATUS_OPTIONS = [
   { value: 'inquiry',   label: '引き合い', color: '#f59e0b' },
@@ -38,6 +41,11 @@ export default function ProjectListScreen({ navigation }: Props) {
   const [filterStatuses, setFilterStatuses] = useState<string[]>([]);
   const [filterMembers, setFilterMembers] = useState<string[]>([]);
 
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [dragOverStatus, setDragOverStatus] = useState<string | null>(null);
+  const dragIdRef  = useRef<string | null>(null);
+  const ghostRef   = useRef<HTMLDivElement | null>(null);
+
   const isAdmin = profile?.role === 'admin';
   const canCreate = profile?.role === 'admin' || profile?.role === 'employee';
 
@@ -55,6 +63,63 @@ export default function ProjectListScreen({ navigation }: Props) {
       Alert.alert('エラー', e.message ?? '案件の取得に失敗しました');
     }
   }, []);
+
+  // クロージャ問題を回避するためrefでprojectsを保持
+  const projectsRef = useRef<any[]>([]);
+  useEffect(() => { projectsRef.current = allProjects; }, [allProjects]);
+
+  // マウスイベントベースのドラッグ実装（HTML5 DnD API完全廃止）
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!dragIdRef.current) return;
+      if (ghostRef.current) {
+        ghostRef.current.style.left = `${e.clientX - 80}px`;
+        ghostRef.current.style.top  = `${e.clientY - 20}px`;
+      }
+      const el  = document.elementFromPoint(e.clientX, e.clientY);
+      const col = (el as Element)?.closest?.('[data-kanban-col]');
+      setDragOverStatus(col?.getAttribute('data-kanban-col') ?? null);
+    };
+
+    const onMouseUp = async (e: MouseEvent) => {
+      const id = dragIdRef.current;
+      dragIdRef.current = null;
+      ghostRef.current?.remove();
+      ghostRef.current = null;
+      setDraggedId(null);
+      setDragOverStatus(null);
+      if (!id) return;
+
+      const el  = document.elementFromPoint(e.clientX, e.clientY);
+      const col = (el as Element)?.closest?.('[data-kanban-col]');
+      const newStatus = col?.getAttribute('data-kanban-col');
+      if (!newStatus) return;
+
+      const proj = projectsRef.current.find(p => p.id === id);
+      if (!proj || proj.status === newStatus) return;
+
+      setAllProjects(prev =>
+        prev.map(p => p.id === id
+          ? { ...p, status: newStatus, updated_at: new Date().toISOString() }
+          : p)
+      );
+      const { error } = await supabase
+        .from('projects')
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .eq('id', id);
+      if (error) { Alert.alert('更新失敗', error.message); fetchProjects(); }
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup',   onMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup',   onMouseUp);
+      ghostRef.current?.remove();
+    };
+  }, [fetchProjects]);
 
   useFocusEffect(
     useCallback(() => {
@@ -141,6 +206,14 @@ export default function ProjectListScreen({ navigation }: Props) {
                 <Text style={styles.memberBtnTopText}>👥 メンバー管理</Text>
               </TouchableOpacity>
             )}
+            {isAdmin && (
+              <TouchableOpacity
+                style={[styles.memberBtnTop, { backgroundColor: '#0e7490' }]}
+                onPress={() => navigation.navigate('CustomerList')}
+              >
+                <Text style={styles.memberBtnTopText}>🏢 顧客一覧</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={styles.chatBtn} onPress={handleGlobalChat}>
               <Text style={styles.chatBtnText}>💬 全体チャット</Text>
             </TouchableOpacity>
@@ -185,7 +258,7 @@ export default function ProjectListScreen({ navigation }: Props) {
         </View>
 
         {/* カンバンボード */}
-        <ScrollView horizontal style={{ flex: 1 }} contentContainerStyle={styles.kanbanContainer}>
+        <div style={{ display: 'flex', flex: 1, overflowX: 'auto', gap: 12, padding: 16, alignItems: 'flex-start' }}>
           {STATUS_OPTIONS.map((status) => {
             const col = filtered
               .filter((p) => p.status === status.value)
@@ -193,29 +266,38 @@ export default function ProjectListScreen({ navigation }: Props) {
                 new Date(b.updated_at ?? b.created_at).getTime() -
                 new Date(a.updated_at ?? a.created_at).getTime()
               );
+            const isOver = dragOverStatus === status.value;
             return (
-              <View key={status.value} style={styles.kanbanCol}>
+              <div
+                key={status.value}
+                data-kanban-col={status.value}
+                style={{
+                  minWidth: 260, maxWidth: 300, flex: '0 0 auto',
+                  backgroundColor: isOver ? status.color + '12' : '#f8fafc',
+                  border: isOver ? `2px dashed ${status.color}` : '2px solid #e2e8f0',
+                  borderRadius: 14, display: 'flex', flexDirection: 'column',
+                  maxHeight: 'calc(100vh - 180px)', overflow: 'hidden',
+                  transition: 'all 0.15s ease',
+                }}
+              >
                 {/* 列ヘッダー */}
-                <View style={[styles.kanbanHeader, { borderTopColor: status.color }]}>
-                  <Text style={[styles.kanbanHeaderLabel, { color: status.color }]}>
-                    {status.label}
-                  </Text>
-                  <View style={[styles.kanbanBadge, { backgroundColor: status.color }]}>
-                    <Text style={styles.kanbanBadgeText}>{col.length}</Text>
-                  </View>
-                </View>
+                <div style={{ borderTop: `4px solid ${status.color}`, borderRadius: '12px 12px 0 0', padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 8, backgroundColor: '#fff' }}>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: status.color }}>{status.label}</span>
+                  <span style={{ backgroundColor: status.color, color: '#fff', borderRadius: 20, padding: '1px 8px', fontSize: 11, fontWeight: 700 }}>{col.length}</span>
+                </div>
 
-                {/* 案件カード列 */}
-                <ScrollView
-                  style={styles.kanbanScroll}
-                  showsVerticalScrollIndicator={false}
-                >
-                  {col.length === 0 ? (
-                    <View style={styles.kanbanEmpty}>
-                      <Text style={styles.kanbanEmptyText}>案件なし</Text>
-                    </View>
-                  ) : col.map((item) => (
-                    <View key={item.id} style={styles.kanbanCardWrap}>
+                {/* カード一覧 */}
+                <div style={{ overflowY: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minHeight: 120 }}>
+                  {isOver && draggedId && (
+                    <div style={{ border: `2px dashed ${status.color}`, borderRadius: 10, padding: 12, textAlign: 'center', color: status.color, fontSize: 13, fontWeight: 700, backgroundColor: '#fff' }}>
+                      ここにドロップ
+                    </div>
+                  )}
+                  {col.length === 0 && !isOver && (
+                    <div style={{ textAlign: 'center', padding: 32, color: '#cbd5e1', fontSize: 13 }}>案件なし</div>
+                  )}
+                  {col.map((item) => (
+                    <div key={item.id} style={{ position: 'relative' }}>
                       {isNew(item) && (
                         <View style={styles.newBadge}>
                           <Text style={styles.newBadgeText}>NEW</Text>
@@ -225,13 +307,43 @@ export default function ProjectListScreen({ navigation }: Props) {
                         project={item}
                         onPress={() => navigation.navigate('ProjectDetail', { projectId: item.id })}
                       />
-                    </View>
+                      {/* ステータス変更セレクト */}
+                      <select
+                        value={item.status}
+                        onChange={async (e: any) => {
+                          const newStatus = e.target.value;
+                          if (!newStatus || newStatus === item.status) return;
+                          setAllProjects(prev =>
+                            prev.map(p => p.id === item.id
+                              ? { ...p, status: newStatus, updated_at: new Date().toISOString() }
+                              : p)
+                          );
+                          const { error } = await supabase
+                            .from('projects')
+                            .update({ status: newStatus, updated_at: new Date().toISOString() })
+                            .eq('id', item.id);
+                          if (error) { Alert.alert('更新失敗', error.message); fetchProjects(); }
+                        }}
+                        onClick={(e: any) => e.stopPropagation()}
+                        style={{
+                          position: 'absolute', bottom: 8, right: 8,
+                          fontSize: 11, padding: '2px 4px', borderRadius: 6,
+                          border: `1px solid ${status.color}`, color: status.color,
+                          backgroundColor: '#fff', cursor: 'pointer',
+                          fontWeight: 700, outline: 'none',
+                        }}
+                      >
+                        {STATUS_OPTIONS.map(s => (
+                          <option key={s.value} value={s.value}>{s.label}</option>
+                        ))}
+                      </select>
+                    </div>
                   ))}
-                </ScrollView>
-              </View>
+                </div>
+              </div>
             );
           })}
-        </ScrollView>
+        </div>
       </View>
     );
   }
@@ -399,10 +511,10 @@ const styles = StyleSheet.create({
   },
   kanbanBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
   kanbanScroll: { flex: 1, padding: 8 },
-  kanbanCardWrap: { position: 'relative', marginBottom: 4 },
-  kanbanEmpty: {
-    alignItems: 'center', paddingVertical: 32,
-  },
+  kanbanCardWrap: { position: 'relative', marginBottom: 4, cursor: 'grab' as any },
+  dropIndicator: { borderWidth: 2, borderStyle: 'dashed', borderRadius: 10, padding: 12, marginBottom: 8, alignItems: 'center' },
+  dropIndicatorText: { fontSize: 13, fontWeight: '700' },
+  kanbanEmpty: { alignItems: 'center', paddingVertical: 32 },
   kanbanEmptyText: { fontSize: 13, color: '#9ca3af' },
   newBadge: {
     position: 'absolute', top: 8, right: 8, zIndex: 10,

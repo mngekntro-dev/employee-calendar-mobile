@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, Modal, TextInput,
-  FlatList, TouchableOpacity, ActivityIndicator,
+  FlatList, TouchableOpacity, ActivityIndicator, Platform,
 } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -41,140 +41,227 @@ export default function CustomerSearchModal({ visible, onClose, onSelect, onNew 
       setLoading(true);
       try {
         const { data } = await supabase
-          .from('customers')
-          .select('*')
+          .from('projects')
+          .select('id, customer_type, customer_company, customer_contact, customer_phone, company_id, created_at')
           .eq('company_id', profile?.company_id)
           .or(`customer_company.ilike.%${query.trim()}%,customer_contact.ilike.%${query.trim()}%`)
+          .not('customer_company', 'is', null)
           .order('created_at', { ascending: false })
-          .limit(20);
-        setResults((data ?? []) as Customer[]);
+          .limit(50);
+        const seen = new Set<string>();
+        const unique = (data ?? []).filter((p: any) => {
+          const key = p.customer_company ?? p.customer_contact ?? '';
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        setResults(unique as Customer[]);
       } finally {
         setLoading(false);
       }
     }, 300);
   }, [query]);
 
-  return (
-    <Modal visible={visible} animationType="slide" transparent>
-      <View style={styles.overlay}>
-        <View style={styles.modal}>
-          <View style={styles.header}>
-            <Text style={styles.title}>顧客を検索</Text>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-              <Text style={styles.closeText}>✕</Text>
-            </TouchableOpacity>
-          </View>
+  const typeColor = (type: string | null) => {
+    if (type === '法人') return { bg: '#eff6ff', text: '#1a56db' };
+    if (type === '個人') return { bg: '#f0fdf4', text: '#15803d' };
+    return { bg: '#f8fafc', text: '#64748b' };
+  };
 
-          <View style={styles.searchBox}>
-            <Text style={styles.searchIcon}>🔍</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="会社名または担当者名で検索..."
-              value={query}
-              onChangeText={setQuery}
-              autoFocus
-              clearButtonMode="while-editing"
-            />
-            {loading && <ActivityIndicator size="small" color="#1a56db" />}
-          </View>
+  const inner = (
+    <View style={styles.modal}>
+      {/* ヘッダー */}
+      <View style={styles.header}>
+        <View style={styles.headerLeft}>
+          <View style={styles.headerDot} />
+          <Text style={styles.title}>顧客を検索</Text>
+        </View>
+        <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+          <Text style={styles.closeText}>✕</Text>
+        </TouchableOpacity>
+      </View>
 
-          <FlatList
-            data={results}
-            keyExtractor={(item) => item.id}
-            style={styles.list}
-            keyboardShouldPersistTaps="handled"
-            ListHeaderComponent={
-              query.trim().length > 0 ? (
-                <TouchableOpacity
-                  style={styles.newItem}
-                  onPress={() => { onNew(query.trim()); onClose(); }}
-                >
-                  <Text style={styles.newItemIcon}>＋</Text>
-                  <View>
-                    <Text style={styles.newItemText}>「{query.trim()}」として新規登録</Text>
-                    <Text style={styles.newItemSub}>顧客データが新しく作成されます</Text>
-                  </View>
-                </TouchableOpacity>
-              ) : null
-            }
-            ListEmptyComponent={
-              query.trim().length > 0 && !loading ? (
-                <Text style={styles.emptyText}>該当する顧客が見つかりません</Text>
-              ) : (
-                <Text style={styles.emptyText}>会社名・担当者名を入力して検索</Text>
-              )
-            }
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={styles.item}
-                onPress={() => { onSelect(item); onClose(); }}
-              >
-                <View style={styles.itemIcon}>
-                  <Text style={styles.itemIconText}>🏢</Text>
-                </View>
-                <View style={styles.itemInfo}>
-                  <Text style={styles.itemName}>{item.customer_company ?? item.customer_contact ?? '不明'}</Text>
-                  {item.customer_contact && item.customer_company && (
-                    <Text style={styles.itemSub}>担当：{item.customer_contact}</Text>
-                  )}
-                  {item.customer_phone && (
-                    <Text style={styles.itemSub}>📞 {item.customer_phone}</Text>
-                  )}
-                  {item.customer_type && (
-                    <Text style={styles.itemType}>{item.customer_type}</Text>
-                  )}
-                </View>
-                <Text style={styles.itemArrow}>›</Text>
-              </TouchableOpacity>
-            )}
+      {/* 検索ボックス */}
+      <View style={styles.searchWrap}>
+        <View style={styles.searchBox}>
+          <Text style={styles.searchIcon}>🔍</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="会社名または担当者名で検索..."
+            placeholderTextColor="#9ca3af"
+            value={query}
+            onChangeText={setQuery}
+            autoFocus
+            clearButtonMode="while-editing"
           />
+          {loading && <ActivityIndicator size="small" color="#1a56db" />}
         </View>
       </View>
+
+      <FlatList
+        data={results}
+        keyExtractor={(item) => item.id}
+        style={styles.list}
+        keyboardShouldPersistTaps="handled"
+        ListHeaderComponent={
+          query.trim().length > 0 ? (
+            <TouchableOpacity
+              style={styles.newItem}
+              onPress={() => { onNew(query.trim()); onClose(); }}
+            >
+              <View style={styles.newItemIconWrap}>
+                <Text style={styles.newItemIcon}>＋</Text>
+              </View>
+              <View style={styles.newItemBody}>
+                <Text style={styles.newItemText}>「{query.trim()}」として新規登録</Text>
+                <Text style={styles.newItemSub}>顧客データが新しく作成されます</Text>
+              </View>
+            </TouchableOpacity>
+          ) : null
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyWrap}>
+            <Text style={styles.emptyIcon}>{query.trim().length > 0 ? '🔎' : '🏢'}</Text>
+            <Text style={styles.emptyText}>
+              {query.trim().length > 0 && !loading
+                ? '該当する顧客が見つかりません'
+                : '会社名・担当者名を入力して検索'}
+            </Text>
+          </View>
+        }
+        renderItem={({ item }) => {
+          const tc = typeColor(item.customer_type);
+          return (
+            <TouchableOpacity
+              style={styles.item}
+              onPress={() => { onSelect(item); onClose(); }}
+            >
+              <View style={styles.itemIconWrap}>
+                <Text style={styles.itemIconText}>🏢</Text>
+              </View>
+              <View style={styles.itemInfo}>
+                <View style={styles.itemNameRow}>
+                  <Text style={styles.itemName} numberOfLines={1}>
+                    {item.customer_company ?? item.customer_contact ?? '不明'}
+                  </Text>
+                  {item.customer_type && (
+                    <View style={[styles.typeBadge, { backgroundColor: tc.bg }]}>
+                      <Text style={[styles.typeBadgeText, { color: tc.text }]}>{item.customer_type}</Text>
+                    </View>
+                  )}
+                </View>
+                {item.customer_contact && item.customer_company && (
+                  <Text style={styles.itemSub}>👤 {item.customer_contact}</Text>
+                )}
+                {item.customer_phone && (
+                  <Text style={styles.itemSub}>📞 {item.customer_phone}</Text>
+                )}
+              </View>
+              <View style={styles.arrowWrap}>
+                <Text style={styles.itemArrow}>›</Text>
+              </View>
+            </TouchableOpacity>
+          );
+        }}
+      />
+    </View>
+  );
+
+  if (Platform.OS === 'web') {
+    if (!visible) return null;
+    return (
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 9999,
+        backgroundColor: 'rgba(15,23,42,0.5)',
+        backdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <div style={{ width: '100%', maxWidth: 560, margin: '0 16px' }}>
+          {inner}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent>
+      <View style={styles.overlay}>{inner}</View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  modal: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, height: '85%' },
+  overlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.5)', justifyContent: 'flex-end' },
+  modal: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    ...(Platform.OS === 'web' ? {
+      borderRadius: 20,
+      maxHeight: '80vh' as any,
+      overflow: 'hidden' as any,
+      boxShadow: '0 20px 60px rgba(0,0,0,0.3)' as any,
+    } : { height: '85%' }),
+  },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    padding: 20, borderBottomWidth: 1, borderBottomColor: '#e5e7eb',
+    paddingHorizontal: 20, paddingVertical: 18,
+    borderBottomWidth: 1, borderBottomColor: '#f1f5f9',
   },
-  title: { fontSize: 18, fontWeight: '800', color: '#111827' },
-  closeBtn: { padding: 4 },
-  closeText: { fontSize: 18, color: '#6b7280' },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  headerDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#1a56db' },
+  title: { fontSize: 17, fontWeight: '800', color: '#0f172a', letterSpacing: -0.3 },
+  closeBtn: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center',
+  },
+  closeText: { fontSize: 14, color: '#64748b', fontWeight: '700' },
+  searchWrap: { padding: 16, paddingBottom: 8 },
   searchBox: {
     flexDirection: 'row', alignItems: 'center',
-    margin: 16, paddingHorizontal: 12, paddingVertical: 10,
-    backgroundColor: '#f3f4f6', borderRadius: 12,
+    backgroundColor: '#f8fafc', borderRadius: 14,
+    paddingHorizontal: 14, paddingVertical: 12,
+    borderWidth: 1.5, borderColor: '#e2e8f0',
   },
-  searchIcon: { fontSize: 16, marginRight: 8 },
-  input: { flex: 1, fontSize: 16, color: '#111827' },
+  searchIcon: { fontSize: 16, marginRight: 10 },
+  input: { flex: 1, fontSize: 15, color: '#0f172a' },
   list: { flex: 1 },
   newItem: {
     flexDirection: 'row', alignItems: 'center',
-    padding: 16, marginHorizontal: 16, marginBottom: 8,
-    backgroundColor: '#eff6ff', borderRadius: 12,
+    margin: 16, marginBottom: 8, padding: 14,
+    backgroundColor: '#eff6ff', borderRadius: 14,
     borderWidth: 1.5, borderColor: '#1a56db',
   },
-  newItemIcon: { fontSize: 22, color: '#1a56db', marginRight: 12, fontWeight: '700' },
-  newItemText: { fontSize: 15, fontWeight: '700', color: '#1a56db' },
-  newItemSub: { fontSize: 12, color: '#6b7280', marginTop: 2 },
+  newItemIconWrap: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: '#1a56db', alignItems: 'center', justifyContent: 'center',
+    marginRight: 12,
+  },
+  newItemIcon: { fontSize: 18, color: '#fff', fontWeight: '700' },
+  newItemBody: { flex: 1 },
+  newItemText: { fontSize: 14, fontWeight: '700', color: '#1a56db' },
+  newItemSub: { fontSize: 12, color: '#64748b', marginTop: 2 },
   item: {
     flexDirection: 'row', alignItems: 'center',
     paddingVertical: 14, paddingHorizontal: 16,
-    borderBottomWidth: 1, borderBottomColor: '#f3f4f6',
+    borderBottomWidth: 1, borderBottomColor: '#f8fafc',
   },
-  itemIcon: {
-    width: 40, height: 40, borderRadius: 8, backgroundColor: '#f3f4f6',
-    justifyContent: 'center', alignItems: 'center', marginRight: 12,
+  itemIconWrap: {
+    width: 44, height: 44, borderRadius: 12,
+    backgroundColor: '#f1f5f9', justifyContent: 'center', alignItems: 'center', marginRight: 14,
   },
-  itemIconText: { fontSize: 20 },
+  itemIconText: { fontSize: 22 },
   itemInfo: { flex: 1 },
-  itemName: { fontSize: 15, fontWeight: '700', color: '#111827' },
-  itemSub: { fontSize: 13, color: '#9ca3af', marginTop: 2 },
-  itemType: { fontSize: 12, color: '#1a56db', marginTop: 2, fontWeight: '600' },
-  itemArrow: { fontSize: 20, color: '#d1d5db' },
-  emptyText: { textAlign: 'center', color: '#9ca3af', fontSize: 14, marginTop: 32 },
+  itemNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  itemName: { fontSize: 15, fontWeight: '700', color: '#0f172a' },
+  typeBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
+  typeBadgeText: { fontSize: 11, fontWeight: '700' },
+  itemSub: { fontSize: 12, color: '#94a3b8', marginTop: 3 },
+  arrowWrap: {
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: '#f8fafc', alignItems: 'center', justifyContent: 'center',
+  },
+  itemArrow: { fontSize: 18, color: '#94a3b8' },
+  emptyWrap: { alignItems: 'center', paddingVertical: 48 },
+  emptyIcon: { fontSize: 40, marginBottom: 12 },
+  emptyText: { fontSize: 14, color: '#94a3b8', textAlign: 'center' },
 });

@@ -63,9 +63,39 @@ export default function ProjectFormScreen({ route, navigation }: Props) {
   const [otherNotes, setOtherNotes] = useState('');
   // 顧客情報
   const [customerType, setCustomerType] = useState('');
+  const [customerFurigana, setCustomerFurigana] = useState('');
   const [customerCompany, setCustomerCompany] = useState('');
+  const [customerAddress, setCustomerAddress] = useState('');
   const [customerContact, setCustomerContact] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+
+  // 企業形態タップ選択
+  const PREFIX_OPTIONS = ['（なし）', '株式会社', '有限会社', '合同会社', '一般社団法人', '社会福祉法人', '特定非営利活動法人', '直接入力'];
+  const SUFFIX_OPTIONS = ['（なし）', '株式会社', '有限会社', '合同会社', '直接入力'];
+  const [companyPrefix, setCompanyPrefix] = useState('（なし）');
+  const [companySuffix, setCompanySuffix] = useState('（なし）');
+  const [customPrefix, setCustomPrefix] = useState('');
+  const [customSuffix, setCustomSuffix] = useState('');
+
+  const getPrefix = () => companyPrefix === '直接入力' ? customPrefix : (companyPrefix === '（なし）' ? '' : companyPrefix);
+  const getSuffix = () => companySuffix === '直接入力' ? customSuffix : (companySuffix === '（なし）' ? '' : companySuffix);
+
+  // カタカナ→ひらがな変換
+  const toHiragana = (str: string) =>
+    str.replace(/[\u30A1-\u30F6]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60));
+
+  // 会社名変更時：カナのみなら自動フリガナ
+  const handleCompanyChange = (text: string) => {
+    setCustomerCompany(text);
+    if (/^[\u3040-\u30FF\uFF66-\uFF9F\s　ー\-－]+$/.test(text)) {
+      setCustomerFurigana(toHiragana(text));
+    }
+  };
+
+  // フリガナ欄：カタカナ→ひらがな自動変換
+  const handleFuriganaChange = (text: string) => {
+    setCustomerFurigana(toHiragana(text));
+  };
 
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
@@ -97,22 +127,14 @@ export default function ProjectFormScreen({ route, navigation }: Props) {
 
   // 顧客選択時：自動入力
   const applyCustomer = (cust: Customer) => {
-    const hasData = customerCompany || customerContact || customerPhone;
-    const doApply = () => {
-      setSelectedCustomer(cust);
-      setCustomerType(cust.customer_type ?? '');
-      setCustomerCompany(cust.customer_company ?? '');
-      setCustomerContact(cust.customer_contact ?? '');
-      setCustomerPhone(cust.customer_phone ?? '');
-    };
-    if (hasData) {
-      Alert.alert('上書き確認', '入力済みの顧客情報を上書きしますか？', [
-        { text: 'キャンセル', style: 'cancel' },
-        { text: '上書きする', onPress: doApply },
-      ]);
-    } else {
-      doApply();
-    }
+    setSelectedCustomer(cust);
+    setCustomerType(cust.customer_type ?? '');
+    setCustomerFurigana((cust as any).customer_furigana ?? '');
+    setCustomerCompany(cust.customer_company ?? '');
+    setCustomerAddress((cust as any).customer_address ?? '');
+    setCustomerContact(cust.customer_contact ?? '');
+    setCustomerPhone(cust.customer_phone ?? '');
+    setCustomerModalVisible(false);
   };
 
   // 物件選択時：自動入力
@@ -152,7 +174,11 @@ export default function ProjectFormScreen({ route, navigation }: Props) {
     if (endDate && !dateRegex.test(endDate)) errs.endDate = 'YYYY-MM-DD 形式で入力してください';
     if (startDate && endDate && startDate > endDate) errs.endDate = '終了日は開始日以降にしてください';
     setErrors(errs);
-    return Object.keys(errs).length === 0;
+    if (Object.keys(errs).length > 0) {
+      Alert.alert('入力エラー', Object.values(errs).join('\n'));
+      return false;
+    }
+    return true;
   };
 
   const handleSave = async () => {
@@ -196,7 +222,8 @@ export default function ProjectFormScreen({ route, navigation }: Props) {
         parking_info: parkingInfo || null, work_period: workPeriod || null,
         weekend_work: weekendWork || null, smoking_rule: smokingRule || null,
         other_notes: otherNotes || null,
-        customer_type: customerType || null, customer_company: customerCompany || null,
+        customer_type: customerType || null, customer_company: (getPrefix() + customerCompany + getSuffix()) || null,
+        customer_furigana: customerFurigana || null, customer_address: customerAddress || null,
         customer_contact: customerContact || null, customer_phone: customerPhone || null,
       };
 
@@ -317,7 +344,51 @@ export default function ProjectFormScreen({ route, navigation }: Props) {
               </TouchableOpacity>
             ))}
           </View>
-          <Input label="会社名" placeholder="例）株式会社○○" value={customerCompany} onChangeText={setCustomerCompany} />
+          <Input label="フリガナ" placeholder="例）かぶしきがいしゃ〇〇" value={customerFurigana} onChangeText={handleFuriganaChange} />
+          {customerType === '法人' ? (
+            <>
+              <Text style={styles.label}>前株（会社形態）</Text>
+              <View style={styles.chipGrid}>
+                {PREFIX_OPTIONS.map((opt) => (
+                  <TouchableOpacity
+                    key={opt}
+                    style={[styles.chipOption, companyPrefix === opt && styles.chipSelected]}
+                    onPress={() => setCompanyPrefix(opt)}
+                  >
+                    <Text style={[styles.chipOptionText, companyPrefix === opt && styles.chipSelectedText]}>{opt}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {companyPrefix === '直接入力' && (
+                <Input label="前株（自由記入）" placeholder="例）一般財団法人" value={customPrefix} onChangeText={setCustomPrefix} />
+              )}
+              <Input label="会社名" placeholder="例）三幸" value={customerCompany} onChangeText={handleCompanyChange} />
+              <Text style={styles.label}>後株（会社形態）</Text>
+              <View style={styles.chipGrid}>
+                {SUFFIX_OPTIONS.map((opt) => (
+                  <TouchableOpacity
+                    key={opt}
+                    style={[styles.chipOption, companySuffix === opt && styles.chipSelected]}
+                    onPress={() => setCompanySuffix(opt)}
+                  >
+                    <Text style={[styles.chipOptionText, companySuffix === opt && styles.chipSelectedText]}>{opt}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {companySuffix === '直接入力' && (
+                <Input label="後株（自由記入）" placeholder="例）協同組合" value={customSuffix} onChangeText={setCustomSuffix} />
+              )}
+              {(getPrefix() || customerCompany || getSuffix()) ? (
+                <View style={styles.companyPreview}>
+                  <Text style={styles.companyPreviewLabel}>保存される会社名：</Text>
+                  <Text style={styles.companyPreviewValue}>{getPrefix()}{customerCompany}{getSuffix()}</Text>
+                </View>
+              ) : null}
+            </>
+          ) : (
+            <Input label="会社名" placeholder="例）株式会社○○" value={customerCompany} onChangeText={handleCompanyChange} />
+          )}
+          <Input label="住所" placeholder="例）東京都〇〇区..." value={customerAddress} onChangeText={setCustomerAddress} />
           <Input label="担当者名" placeholder="例）山田 太郎" value={customerContact} onChangeText={setCustomerContact} />
           <Input label="電話番号" placeholder="例）03-1234-5678" value={customerPhone} onChangeText={setCustomerPhone} keyboardType="phone-pad" />
         </View>
@@ -330,10 +401,12 @@ export default function ProjectFormScreen({ route, navigation }: Props) {
   return (
     <View style={styles.flex}>
       {Platform.OS === 'web' ? (
-        <div className="project-form-scroll" style={{ height: '100vh', overflowY: 'auto', padding: 16, paddingBottom: 40 }}>
-          {content}
-          <PropertySearchModal visible={propertyModalVisible} onClose={() => setPropertyModalVisible(false)} onSelect={applyProperty} onNewProperty={applyNewPropertyName} />
-          <CustomerSearchModal visible={customerModalVisible} onClose={() => setCustomerModalVisible(false)} onSelect={applyCustomer} onNew={(name) => setCustomerCompany(name)} />
+        <div className="project-form-scroll" style={{ height: '100vh', overflowY: 'auto', backgroundColor: '#f1f5f9' }}>
+          <div style={{ maxWidth: 720, margin: '0 auto', padding: '24px 24px 60px' }}>
+            {content}
+            <PropertySearchModal visible={propertyModalVisible} onClose={() => setPropertyModalVisible(false)} onSelect={applyProperty} onNewProperty={applyNewPropertyName} />
+            <CustomerSearchModal visible={customerModalVisible} onClose={() => setCustomerModalVisible(false)} onSelect={applyCustomer} onNew={(name) => setCustomerCompany(name)} />
+          </div>
         </div>
       ) : (
         <ScrollView style={styles.scroll} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
@@ -350,14 +423,15 @@ const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: '#f9fafb', ...(Platform.OS === 'web' ? { height: '100%' as any } : {}) },
   scroll: { flex: 1 },
   container: { padding: 16, paddingBottom: 40 },
-  sectionTitle: { fontSize: 14, fontWeight: '700', color: '#6b7280', marginBottom: 8, marginTop: 16, textTransform: 'uppercase', letterSpacing: 0.5 },
+  sectionTitle: { fontSize: 11, fontWeight: '700', color: '#94a3b8', marginBottom: 8, marginTop: 20, textTransform: 'uppercase', letterSpacing: 1.2 },
   callPropertyBtn: {
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: '#eff6ff', borderWidth: 1.5, borderColor: '#1a56db',
     borderRadius: 8, paddingVertical: 10, marginBottom: 10,
   },
   callPropertyBtnText: { color: '#1a56db', fontSize: 14, fontWeight: '700' },
-  card: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 4, elevation: 1 },
+  card: { backgroundColor: '#fff', borderRadius: 16, padding: 20, marginBottom: 8,
+    ...(Platform.OS === 'web' ? { boxShadow: '0 1px 4px rgba(0,0,0,0.08)' } as any : { elevation: 1 }) },
   propertySearchBtn: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: '#f3f4f6', borderRadius: 10,
@@ -383,4 +457,12 @@ const styles = StyleSheet.create({
   typeSelected: { borderColor: '#1a56db', backgroundColor: '#eff6ff' },
   typeOptionText: { fontSize: 15, fontWeight: '700', color: '#6b7280' },
   typeSelectedText: { color: '#1a56db' },
+  chipGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  chipOption: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1.5, borderColor: '#d1d5db', backgroundColor: '#f9fafb' },
+  chipSelected: { borderColor: '#1a56db', backgroundColor: '#eff6ff' },
+  chipOptionText: { fontSize: 13, fontWeight: '600', color: '#6b7280' },
+  chipSelectedText: { color: '#1a56db' },
+  companyPreview: { backgroundColor: '#f0fdf4', borderRadius: 8, padding: 10, marginBottom: 12, borderWidth: 1, borderColor: '#86efac' },
+  companyPreviewLabel: { fontSize: 12, color: '#15803d', marginBottom: 2 },
+  companyPreviewValue: { fontSize: 15, fontWeight: '700', color: '#15803d' },
 });

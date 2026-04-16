@@ -62,10 +62,10 @@ export default function LoginScreen() {
         {/* ヘッダー */}
         <View style={styles.header}>
           <View style={styles.iconWrapper}>
-            <Text style={styles.icon}>🏗️</Text>
+            <Text style={styles.icon}>⚡</Text>
           </View>
-          <Text style={styles.title}>建設現場管理</Text>
-          <Text style={styles.subtitle}>ログインして案件を管理する</Text>
+          <Text style={styles.title}>発電機管理</Text>
+          <Text style={styles.subtitle}>ログインして発電機案件を管理する</Text>
         </View>
 
         {/* フォーム */}

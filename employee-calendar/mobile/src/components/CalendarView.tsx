@@ -26,6 +26,9 @@ export const CalendarView = ({ schedules, employees, selectedDate, onDayPress }:
     if (!schedulesByDate[key]) schedulesByDate[key] = [];
     schedulesByDate[key].push(s);
   });
+  Object.keys(schedulesByDate).forEach(key => {
+    schedulesByDate[key].sort((a, b) => a.user_id - b.user_id);
+  });
 
   const base = selectedDate ? new Date(selectedDate + 'T00:00:00') : new Date();
   const year = base.getFullYear();
@@ -98,7 +101,10 @@ export const CalendarView = ({ schedules, employees, selectedDate, onDayPress }:
                     const color = emp?.color || '#3B82F6';
                     const initials = emp?.name?.[0] || '';
                     return (
-                      <View key={si} style={{ backgroundColor: color, marginHorizontal: 1, marginTop: 1, borderRadius: 2, paddingHorizontal: 2 }}>
+                      <View
+                        key={si}
+                        style={{ backgroundColor: color, marginHorizontal: 1, marginTop: 1, borderRadius: 2, paddingHorizontal: 2 }}
+                      >
                         <Text numberOfLines={1} style={{ fontSize: 8, color: '#fff' }}>{initials}{s.title}</Text>
                       </View>
                     );

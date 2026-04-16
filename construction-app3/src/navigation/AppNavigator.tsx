@@ -13,8 +13,8 @@ const Stack = createStackNavigator<RootStackParamList>();
 
 const prefix = Linking.createURL('/');
 
-const linking = {
-  prefixes: [prefix, 'construction-app://', 'exp+construction-app://'],
+const linking: any = {
+  prefixes: [prefix, 'generator-app://', 'exp+generator-app://'],
   config: {
     screens: {
       Login: 'login',

@@ -7,6 +7,7 @@ import { View, ActivityIndicator, TouchableOpacity, Text } from 'react-native';
 import { useAuthStore } from './src/store/authStore';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { CalendarScreen } from './src/screens/CalendarScreen';
+import { TodoScreen } from './src/screens/TodoScreen';
 import { EmployeeListScreen } from './src/screens/EmployeeListScreen';
 import { ScheduleDetailScreen } from './src/screens/ScheduleDetailScreen';
 import { ScheduleFormScreen } from './src/screens/ScheduleFormScreen';
@@ -37,6 +38,7 @@ const MainTabs = () => {
           ),
         }}
       />
+      <Tab.Screen name="Todo" component={TodoScreen} options={{ title: 'TODO', tabBarLabel: 'TODO' }} />
       <Tab.Screen name="EmployeeList" component={EmployeeListScreen} options={{ title: '社員一覧', tabBarLabel: '社員' }} />
       {user?.role === 'admin' && (
         <Tab.Screen name="Admin" component={AdminScreen} options={{ title: '管理', tabBarLabel: '管理' }} />

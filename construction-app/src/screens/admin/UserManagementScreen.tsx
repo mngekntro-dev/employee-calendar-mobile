@@ -12,9 +12,9 @@ import Card from '../../components/Card';
 import Badge from '../../components/Badge';
 import LoadingOverlay from '../../components/LoadingOverlay';
 
-const ROLES = ['employee', 'admin'] as const;
+const ROLES = ['employee', 'admin', 'partner'] as const;
 type Role = typeof ROLES[number];
-const ROLE_NAMES: Record<Role, string> = { employee: '従業員', admin: '管理者' };
+const ROLE_NAMES: Record<Role, string> = { employee: '社員', admin: '管理者', partner: '協力会社' };
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL ?? 'https://your-backend.railway.app';
 
@@ -76,7 +76,7 @@ export default function UserManagementScreen() {
           email: form.email.trim(),
           password: form.password,
           role: form.role,
-          company_id: profile?.company_id,
+          company_id: profile?.company_id ?? profile?.id ?? 'sanko',
         }),
       });
       const json = await res.json();

@@ -20,14 +20,13 @@ const statusInfo = (v: string) => STATUS_LIST.find(s => s.value === v) ?? STATUS
 
 interface Props { navigation: any; }
 
-const WORK_TYPES = ['負荷試験', '点検', '修理', 'その他'];
-
 export default function GeneratorListScreen({ navigation }: Props) {
   const [cases, setCases] = useState<GeneratorCase[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<CaseStatus | ''>('');
+  const [filterWorkType, setFilterWorkType] = useState('');
   const [showNewMenu, setShowNewMenu] = useState(false);
 
   const goNew = (workType: string) => {
@@ -55,7 +54,7 @@ export default function GeneratorListScreen({ navigation }: Props) {
           !(c.client_name ?? '').toLowerCase().includes(q)) return false;
     }
     if (filterStatus && c.status !== filterStatus) return false;
-    if (filterType && c.work_type !== filterType) return false;
+    if (filterWorkType && c.work_type !== filterWorkType) return false;
     return true;
   });
 
@@ -104,8 +103,8 @@ export default function GeneratorListScreen({ navigation }: Props) {
         <View style={styles.webFilterBar}>
           <TextInput style={styles.webSearch} placeholder="案件名・住所・顧客名で検索..." value={search} onChangeText={setSearch} />
           {WORK_TYPES.map(t => (
-            <TouchableOpacity key={t} style={[styles.chip, filterType === t && styles.chipActive]} onPress={() => setFilterType(prev => prev === t ? '' : t)}>
-              <Text style={[styles.chipText, filterType === t && styles.chipTextActive]}>{t}</Text>
+            <TouchableOpacity key={t} style={[styles.chip, filterWorkType === t && styles.chipActive]} onPress={() => setFilterWorkType(prev => prev === t ? '' : t)}>
+              <Text style={[styles.chipText, filterWorkType === t && styles.chipTextActive]}>{t}</Text>
             </TouchableOpacity>
           ))}
         </View>

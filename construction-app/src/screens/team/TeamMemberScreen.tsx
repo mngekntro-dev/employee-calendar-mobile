@@ -165,17 +165,19 @@ export default function TeamMemberScreen({ route }: Props) {
       />
 
       {/* メンバー追加モーダル */}
-      <Modal visible={addModalVisible} animationType="slide" transparent>
+      <Modal visible={addModalVisible} animationType="fade" transparent>
         <View style={styles.overlay}>
-          <View style={styles.sheet}>
-            {/* ハンドル */}
-            <View style={styles.handle} />
+          <View style={Platform.OS === 'web' ? styles.dialog : styles.sheet}>
+            {/* ハンドル（モバイルのみ） */}
+            {Platform.OS !== 'web' && <View style={styles.handle} />}
 
             {/* ヘッダー */}
             <View style={styles.sheetHeader}>
               <View>
                 <Text style={styles.sheetTitle}>メンバーを追加</Text>
-                <Text style={styles.sheetSub}>{companyMembers.length}名が追加可能</Text>
+                <Text style={styles.sheetSub}>
+                  {companyMembers.length > 0 ? `${companyMembers.length}名が追加可能` : '全員が参加済みです'}
+                </Text>
               </View>
               <TouchableOpacity
                 onPress={() => { setAddModalVisible(false); setSearch(''); }}
@@ -194,6 +196,7 @@ export default function TeamMemberScreen({ route }: Props) {
                 placeholderTextColor="#94a3b8"
                 value={search}
                 onChangeText={setSearch}
+                autoFocus={Platform.OS === 'web'}
               />
               {search.length > 0 && (
                 <TouchableOpacity onPress={() => setSearch('')}>
@@ -204,16 +207,14 @@ export default function TeamMemberScreen({ route }: Props) {
 
             {/* メンバーリスト */}
             <ScrollView contentContainerStyle={styles.sheetBody}>
-              {companyMembers
-                .filter(p =>
-                  p.full_name.toLowerCase().includes(search.toLowerCase()) ||
-                  (p.email ?? '').toLowerCase().includes(search.toLowerCase())
-                )
-                .length === 0 ? (
-                <View style={styles.empty}>
-                  <Text style={styles.emptyIcon}>🔍</Text>
-                  <Text style={styles.emptyTitle}>
-                    {search ? '該当するメンバーが見つかりません' : '追加できるメンバーがいません'}
+              {companyMembers.filter(p =>
+                p.full_name.toLowerCase().includes(search.toLowerCase()) ||
+                (p.email ?? '').toLowerCase().includes(search.toLowerCase())
+              ).length === 0 ? (
+                <View style={styles.emptyModal}>
+                  <Text style={styles.emptyModalIcon}>{search ? '🔍' : '✅'}</Text>
+                  <Text style={styles.emptyModalTitle}>
+                    {search ? '該当するメンバーが見つかりません' : '全員がすでに参加しています'}
                   </Text>
                 </View>
               ) : (
@@ -246,7 +247,9 @@ export default function TeamMemberScreen({ route }: Props) {
                               {ROLE_LABEL[p.role ?? 'employee']}
                             </Text>
                           </View>
-                          <Text style={styles.addArrow}>＋</Text>
+                          <View style={styles.addIconBtn}>
+                            <Text style={styles.addArrow}>＋</Text>
+                          </View>
                         </View>
                       </TouchableOpacity>
                     );
@@ -296,27 +299,33 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 16, fontWeight: '700', color: '#64748b', marginBottom: 4 },
   emptySub: { fontSize: 13, color: '#94a3b8', textAlign: 'center' },
 
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end', alignItems: 'center' as any },
+  dialog: {
+    backgroundColor: '#fff', borderRadius: 24, width: '100%', maxWidth: 480,
+    maxHeight: '80%', marginBottom: 40,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15, shadowRadius: 24, elevation: 10,
+  },
   sheet: {
     backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28,
-    maxHeight: '85%',
+    maxHeight: '85%', width: '100%',
   },
   handle: { width: 40, height: 4, backgroundColor: '#e2e8f0', borderRadius: 2, alignSelf: 'center' as any, marginTop: 12, marginBottom: 4 },
   sheetHeader: {
     flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12,
+    paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12,
   },
-  closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center' },
+  closeBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center' },
   closeBtnText: { fontSize: 13, color: '#64748b', fontWeight: '700' },
   sheetTitle: { fontSize: 18, fontWeight: '800', color: '#0f172a' },
-  sheetSub: { fontSize: 13, color: '#94a3b8', marginTop: 2 },
+  sheetSub: { fontSize: 13, color: '#94a3b8', marginTop: 3 },
   searchBox: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: '#f8fafc', borderRadius: 14, borderWidth: 1.5, borderColor: '#e2e8f0',
-    marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 4,
+    marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 2,
   },
-  searchIcon: { fontSize: 16, marginRight: 8 },
-  searchInput: { flex: 1, fontSize: 15, color: '#0f172a', paddingVertical: 8 },
+  searchIcon: { fontSize: 15, marginRight: 8 },
+  searchInput: { flex: 1, fontSize: 15, color: '#0f172a', paddingVertical: 10 },
   searchClear: { fontSize: 13, color: '#94a3b8', paddingLeft: 8, fontWeight: '700' },
   sheetBody: { padding: 12, paddingBottom: 48 },
   option: {
@@ -331,5 +340,9 @@ const styles = StyleSheet.create({
   optionName: { fontSize: 15, fontWeight: '700', color: '#0f172a' },
   optionEmail: { fontSize: 12, color: '#94a3b8', marginTop: 2 },
   optionRight: { alignItems: 'flex-end', gap: 6 },
-  addArrow: { fontSize: 18, color: '#059669', fontWeight: '800' },
+  addIconBtn: { backgroundColor: '#dcfce7', width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  addArrow: { fontSize: 17, color: '#059669', fontWeight: '800' },
+  emptyModal: { alignItems: 'center', paddingVertical: 40 },
+  emptyModalIcon: { fontSize: 36, marginBottom: 12 },
+  emptyModalTitle: { fontSize: 15, fontWeight: '600', color: '#64748b', textAlign: 'center' },
 });

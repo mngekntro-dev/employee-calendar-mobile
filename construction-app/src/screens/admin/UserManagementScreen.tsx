@@ -77,9 +77,16 @@ export default function UserManagementScreen() {
   const deleteUser = (target: Profile) => {
     if (target.id === profile?.id) { Alert.alert('エラー', '自分自身は削除できません'); return; }
     const doDelete = async () => {
-      const { error } = await supabase.from('profiles').delete().eq('id', target.id);
-      if (error) Alert.alert('エラー', '削除に失敗しました');
-      else fetchUsers();
+      try {
+        // 1. profilesテーブルから削除
+        await supabase.from('profiles').delete().eq('id', target.id);
+        // 2. Auth からも削除（バックエンド経由）
+        await fetch(`${BACKEND_URL}/api/users/${target.id}`, { method: 'DELETE' });
+        fetchUsers();
+        alert(`${target.full_name} を削除しました`);
+      } catch (e: any) {
+        Alert.alert('エラー', '削除に失敗しました');
+      }
     };
     if (Platform.OS === 'web') {
       if (window.confirm(`「${target.full_name}」を削除しますか？`)) doDelete();

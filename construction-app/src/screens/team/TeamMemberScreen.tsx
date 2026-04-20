@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, Alert,
-  TouchableOpacity, Modal, ScrollView, RefreshControl, Platform,
+  TouchableOpacity, Modal, ScrollView, RefreshControl, Platform, TextInput,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../../lib/supabase';
@@ -29,6 +29,7 @@ export default function TeamMemberScreen({ route }: Props) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [addModalVisible, setAddModalVisible] = useState(false);
+  const [search, setSearch] = useState('');
 
   const isAdmin = profile?.role === 'admin';
   const isEmployee = profile?.role === 'employee';
@@ -167,36 +168,89 @@ export default function TeamMemberScreen({ route }: Props) {
       <Modal visible={addModalVisible} animationType="slide" transparent>
         <View style={styles.overlay}>
           <View style={styles.sheet}>
+            {/* ハンドル */}
+            <View style={styles.handle} />
+
+            {/* ヘッダー */}
             <View style={styles.sheetHeader}>
-              <TouchableOpacity onPress={() => setAddModalVisible(false)} style={styles.closeBtn}>
+              <View>
+                <Text style={styles.sheetTitle}>メンバーを追加</Text>
+                <Text style={styles.sheetSub}>{companyMembers.length}名が追加可能</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => { setAddModalVisible(false); setSearch(''); }}
+                style={styles.closeBtn}
+              >
                 <Text style={styles.closeBtnText}>✕</Text>
               </TouchableOpacity>
-              <Text style={styles.sheetTitle}>メンバーを追加</Text>
-              <View style={{ width: 32 }} />
             </View>
+
+            {/* 検索欄 */}
+            <View style={styles.searchBox}>
+              <Text style={styles.searchIcon}>🔍</Text>
+              <TextInput
+                style={styles.searchInput}
+                placeholder="名前・メールで検索..."
+                placeholderTextColor="#94a3b8"
+                value={search}
+                onChangeText={setSearch}
+              />
+              {search.length > 0 && (
+                <TouchableOpacity onPress={() => setSearch('')}>
+                  <Text style={styles.searchClear}>✕</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* メンバーリスト */}
             <ScrollView contentContainerStyle={styles.sheetBody}>
-              {companyMembers.length === 0 ? (
+              {companyMembers
+                .filter(p =>
+                  p.full_name.toLowerCase().includes(search.toLowerCase()) ||
+                  (p.email ?? '').toLowerCase().includes(search.toLowerCase())
+                )
+                .length === 0 ? (
                 <View style={styles.empty}>
-                  <Text style={styles.emptyTitle}>追加できるメンバーがいません</Text>
+                  <Text style={styles.emptyIcon}>🔍</Text>
+                  <Text style={styles.emptyTitle}>
+                    {search ? '該当するメンバーが見つかりません' : '追加できるメンバーがいません'}
+                  </Text>
                 </View>
               ) : (
-                companyMembers.map((p) => {
-                  const c = ROLE_COLOR[p.role ?? 'employee'] ?? ROLE_COLOR.employee;
-                  return (
-                    <TouchableOpacity key={p.id} style={styles.option} onPress={() => addMember(p.id)}>
-                      <View style={[styles.optionAvatar, { backgroundColor: c.bg }]}>
-                        <Text style={[styles.optionAvatarText, { color: c.text }]}>{p.full_name[0]}</Text>
-                      </View>
-                      <View style={styles.optionInfo}>
-                        <Text style={styles.optionName}>{p.full_name}</Text>
-                        <Text style={styles.optionEmail}>{p.email}</Text>
-                      </View>
-                      <View style={[styles.roleBadge, { backgroundColor: c.bg }]}>
-                        <Text style={[styles.roleText, { color: c.text }]}>{ROLE_LABEL[p.role ?? 'employee']}</Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })
+                companyMembers
+                  .filter(p =>
+                    p.full_name.toLowerCase().includes(search.toLowerCase()) ||
+                    (p.email ?? '').toLowerCase().includes(search.toLowerCase())
+                  )
+                  .map((p) => {
+                    const c = ROLE_COLOR[p.role ?? 'employee'] ?? ROLE_COLOR.employee;
+                    return (
+                      <TouchableOpacity
+                        key={p.id}
+                        style={styles.option}
+                        onPress={() => { addMember(p.id); setSearch(''); }}
+                        activeOpacity={0.7}
+                      >
+                        <View style={[styles.optionAvatar, { backgroundColor: c.bg }]}>
+                          <Text style={[styles.optionAvatarText, { color: c.text }]}>
+                            {p.full_name[0]}
+                          </Text>
+                        </View>
+                        <View style={styles.optionInfo}>
+                          <Text style={styles.optionName}>{p.full_name}</Text>
+                          <Text style={styles.optionEmail}>{p.email}</Text>
+                        </View>
+                        <View style={styles.optionRight}>
+                          <View style={[styles.roleBadge, { backgroundColor: c.bg }]}>
+                            <Text style={[styles.roleText, { color: c.text }]}>
+                              {ROLE_LABEL[p.role ?? 'employee']}
+                            </Text>
+                          </View>
+                          <Text style={styles.addArrow}>＋</Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })
               )}
             </ScrollView>
           </View>
@@ -247,23 +301,35 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28,
     maxHeight: '85%',
   },
+  handle: { width: 40, height: 4, backgroundColor: '#e2e8f0', borderRadius: 2, alignSelf: 'center' as any, marginTop: 12, marginBottom: 4 },
   sheetHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    padding: 20, borderBottomWidth: 1, borderBottomColor: '#f1f5f9',
+    flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12,
   },
   closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center' },
-  closeBtnText: { fontSize: 14, color: '#64748b', fontWeight: '700' },
-  sheetTitle: { fontSize: 17, fontWeight: '800', color: '#0f172a' },
-  sheetBody: { padding: 16, paddingBottom: 40 },
-
+  closeBtnText: { fontSize: 13, color: '#64748b', fontWeight: '700' },
+  sheetTitle: { fontSize: 18, fontWeight: '800', color: '#0f172a' },
+  sheetSub: { fontSize: 13, color: '#94a3b8', marginTop: 2 },
+  searchBox: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#f8fafc', borderRadius: 14, borderWidth: 1.5, borderColor: '#e2e8f0',
+    marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 4,
+  },
+  searchIcon: { fontSize: 16, marginRight: 8 },
+  searchInput: { flex: 1, fontSize: 15, color: '#0f172a', paddingVertical: 8 },
+  searchClear: { fontSize: 13, color: '#94a3b8', paddingLeft: 8, fontWeight: '700' },
+  sheetBody: { padding: 12, paddingBottom: 48 },
   option: {
     flexDirection: 'row', alignItems: 'center',
-    paddingVertical: 12, paddingHorizontal: 4,
-    borderBottomWidth: 1, borderBottomColor: '#f1f5f9',
+    backgroundColor: '#fff', borderRadius: 14,
+    padding: 12, marginBottom: 8,
+    borderWidth: 1.5, borderColor: '#f1f5f9',
   },
-  optionAvatar: { width: 42, height: 42, borderRadius: 21, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  optionAvatarText: { fontSize: 18, fontWeight: '800' },
+  optionAvatar: { width: 46, height: 46, borderRadius: 23, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  optionAvatarText: { fontSize: 19, fontWeight: '800' },
   optionInfo: { flex: 1 },
   optionName: { fontSize: 15, fontWeight: '700', color: '#0f172a' },
   optionEmail: { fontSize: 12, color: '#94a3b8', marginTop: 2 },
+  optionRight: { alignItems: 'flex-end', gap: 6 },
+  addArrow: { fontSize: 18, color: '#059669', fontWeight: '800' },
 });

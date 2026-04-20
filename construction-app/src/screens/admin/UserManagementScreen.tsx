@@ -31,7 +31,7 @@ export default function UserManagementScreen() {
 
   // 編集モーダル
   const [editTarget, setEditTarget] = useState<Profile | null>(null);
-  const [editForm, setEditForm] = useState({ full_name: '', role: 'employee' as Role });
+  const [editForm, setEditForm] = useState({ full_name: '', role: 'employee' as Role, email: '', newPassword: '' });
   const [editSaving, setEditSaving] = useState(false);
 
   const fetchUsers = useCallback(async () => {
@@ -53,19 +53,41 @@ export default function UserManagementScreen() {
 
   const openEdit = (target: Profile) => {
     setEditTarget(target);
-    setEditForm({ full_name: target.full_name, role: (target.role as Role) ?? 'employee' });
+    setEditForm({ full_name: target.full_name, role: (target.role as Role) ?? 'employee', email: target.email ?? '', newPassword: '' });
   };
 
   const handleEdit = async () => {
     if (!editTarget) return;
     if (!editForm.full_name.trim()) { alert('名前を入力してください'); return; }
+    if (editForm.newPassword && editForm.newPassword.length < 6) { alert('パスワードは6文字以上で入力してください'); return; }
     setEditSaving(true);
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ full_name: editForm.full_name.trim(), role: editForm.role })
-        .eq('id', editTarget.id);
+      // プロフィール更新
+      const updates: any = { full_name: editForm.full_name.trim(), role: editForm.role };
+      if (editForm.email.trim() && editForm.email.trim() !== editTarget.email) {
+        updates.email = editForm.email.trim();
+      }
+      const { error } = await supabase.from('profiles').update(updates).eq('id', editTarget.id);
       if (error) throw error;
+
+      // メールアドレス変更（Auth側）
+      if (editForm.email.trim() && editForm.email.trim() !== editTarget.email) {
+        await fetch(`${BACKEND_URL}/api/users/${editTarget.id}/password`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ newEmail: editForm.email.trim() }),
+        });
+      }
+
+      // パスワード変更
+      if (editForm.newPassword) {
+        const res = await fetch(`${BACKEND_URL}/api/users/${editTarget.id}/password`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ newPassword: editForm.newPassword }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? 'パスワード変更に失敗しました');
+      }
+
       setEditTarget(null);
       fetchUsers();
       alert('メンバー情報を更新しました');
@@ -228,16 +250,29 @@ export default function UserManagementScreen() {
               </TouchableOpacity>
             </View>
             <ScrollView contentContainerStyle={styles.sheetBody} keyboardShouldPersistTaps="handled">
-              <View style={styles.emailDisplay}>
-                <Text style={styles.emailLabel}>メールアドレス</Text>
-                <Text style={styles.emailValue}>{editTarget?.email}</Text>
-              </View>
               <Text style={styles.label}>名前 <Text style={styles.req}>必須</Text></Text>
               <TextInput
                 style={styles.input}
                 value={editForm.full_name}
                 onChangeText={v => setEditForm(f => ({ ...f, full_name: v }))}
                 placeholder="例：山田 太郎"
+              />
+              <Text style={styles.label}>メールアドレス</Text>
+              <TextInput
+                style={styles.input}
+                value={editForm.email}
+                onChangeText={v => setEditForm(f => ({ ...f, email: v }))}
+                placeholder="example@email.com"
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+              <Text style={styles.label}>新しいパスワード <Text style={styles.optional}>（変更する場合のみ）</Text></Text>
+              <TextInput
+                style={styles.input}
+                value={editForm.newPassword}
+                onChangeText={v => setEditForm(f => ({ ...f, newPassword: v }))}
+                placeholder="6文字以上（空欄なら変更なし）"
+                secureTextEntry
               />
               <Text style={styles.label}>権限</Text>
               <View style={styles.roleRow}>
@@ -291,6 +326,7 @@ const styles = StyleSheet.create({
   sheetBody: { padding: 20, paddingBottom: 48 },
   label: { fontSize: 13, fontWeight: '700', color: '#374151', marginBottom: 6, marginTop: 16 },
   req: { color: '#ef4444', fontWeight: '500' },
+  optional: { color: '#94a3b8', fontWeight: '400', fontSize: 12 },
   input: { borderWidth: 1.5, borderColor: '#e2e8f0', borderRadius: 12, padding: 13, fontSize: 15, color: '#0f172a', backgroundColor: '#fafafa' },
   roleRow: { flexDirection: 'row', gap: 10 },
   roleChip: { flex: 1, paddingVertical: 12, borderRadius: 12, borderWidth: 1.5, borderColor: '#e2e8f0', alignItems: 'center', backgroundColor: '#fff' },

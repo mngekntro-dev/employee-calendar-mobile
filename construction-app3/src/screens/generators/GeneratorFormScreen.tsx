@@ -109,6 +109,30 @@ export default function GeneratorFormScreen({ route, navigation }: Props) {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+
+      {/* 作業種別選択（新規のみ大きく表示） */}
+      {!isEdit && (
+        <View style={styles.workTypeSection}>
+          <Text style={styles.workTypeTitle}>作業種別を選択</Text>
+          <View style={styles.workTypeGrid}>
+            {WORK_TYPES.map(t => {
+              const icons: Record<string, string> = { '負荷試験': '⚡', '点検': '🔍', '修理': '🔧', 'その他': '📋' };
+              const active = form.work_type === t;
+              return (
+                <TouchableOpacity
+                  key={t}
+                  style={[styles.workTypeCard, active && styles.workTypeCardActive]}
+                  onPress={() => setForm(f => ({ ...f, work_type: t }))}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.workTypeIcon}>{icons[t]}</Text>
+                  <Text style={[styles.workTypeLabel, active && styles.workTypeLabelActive]}>{t}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+      )}
       {generators.length > 0 && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>既存発電機から自動入力</Text>
@@ -186,6 +210,17 @@ export default function GeneratorFormScreen({ route, navigation }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f3f4f6' },
   content: { padding: 16, paddingBottom: 60 },
+  workTypeSection: { marginBottom: 20 },
+  workTypeTitle: { fontSize: 16, fontWeight: '800', color: '#0f172a', marginBottom: 12 },
+  workTypeGrid: { flexDirection: 'row', flexWrap: 'wrap' as any, gap: 10 },
+  workTypeCard: {
+    flex: 1, minWidth: '45%', alignItems: 'center' as any, paddingVertical: 20,
+    backgroundColor: '#fff', borderRadius: 16, borderWidth: 2, borderColor: '#e2e8f0',
+  },
+  workTypeCardActive: { borderColor: C, backgroundColor: '#f0fdf9' },
+  workTypeIcon: { fontSize: 30, marginBottom: 8 },
+  workTypeLabel: { fontSize: 15, fontWeight: '700', color: '#64748b' },
+  workTypeLabelActive: { color: C },
   section: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 16, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 4, elevation: 1 },
   sectionTitle: { fontSize: 15, fontWeight: '800', color: C, marginBottom: 12 },
   label: { fontSize: 13, fontWeight: '600', color: '#6b7280', marginBottom: 4, marginTop: 8 },

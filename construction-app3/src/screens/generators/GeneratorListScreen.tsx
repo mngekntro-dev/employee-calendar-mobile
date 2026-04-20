@@ -81,20 +81,9 @@ export default function GeneratorListScreen({ navigation }: Props) {
         <View style={styles.topBar}>
           <Text style={styles.topBarTitle}>⚡ 発電機管理</Text>
           <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
-          <View style={{ position: 'relative' }}>
-              <TouchableOpacity style={styles.newBtn} onPress={() => setShowNewMenu(v => !v)}>
-                <Text style={styles.newBtnText}>＋ 新規案件登録 ▾</Text>
-              </TouchableOpacity>
-              {showNewMenu && (
-                <View style={styles.dropdown}>
-                  {WORK_TYPES.map(t => (
-                    <TouchableOpacity key={t} style={styles.dropdownItem} onPress={() => goNew(t)}>
-                      <Text style={styles.dropdownText}>{t}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-            </View>
+            <TouchableOpacity style={styles.newBtn} onPress={() => navigation.navigate('GeneratorForm', {})}>
+              <Text style={styles.newBtnText}>＋ 新規案件登録</Text>
+            </TouchableOpacity>
             <TouchableOpacity style={styles.genListBtn} onPress={() => navigation.navigate('GeneratorMaster', {})}>
               <Text style={styles.genListBtnText}>🔧 発電機台帳</Text>
             </TouchableOpacity>

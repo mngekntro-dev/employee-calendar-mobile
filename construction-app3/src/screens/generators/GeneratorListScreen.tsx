@@ -20,13 +20,20 @@ const statusInfo = (v: string) => STATUS_LIST.find(s => s.value === v) ?? STATUS
 
 interface Props { navigation: any; }
 
+const WORK_TYPES = ['負荷試験', '点検', '修理', 'その他'];
+
 export default function GeneratorListScreen({ navigation }: Props) {
   const [cases, setCases] = useState<GeneratorCase[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<CaseStatus | ''>('');
-  const [filterType, setFilterType] = useState('');
+  const [showNewMenu, setShowNewMenu] = useState(false);
+
+  const goNew = (workType: string) => {
+    setShowNewMenu(false);
+    navigation.navigate('GeneratorForm', { workType });
+  };
 
   const load = useCallback(async () => {
     try { const data = await fetchCases(); setCases(data); }
@@ -75,9 +82,20 @@ export default function GeneratorListScreen({ navigation }: Props) {
         <View style={styles.topBar}>
           <Text style={styles.topBarTitle}>⚡ 発電機管理</Text>
           <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
-            <TouchableOpacity style={styles.newBtn} onPress={() => navigation.navigate('GeneratorForm', {})}>
-              <Text style={styles.newBtnText}>＋ 新規案件登録</Text>
-            </TouchableOpacity>
+          <View style={{ position: 'relative' }}>
+              <TouchableOpacity style={styles.newBtn} onPress={() => setShowNewMenu(v => !v)}>
+                <Text style={styles.newBtnText}>＋ 新規案件登録 ▾</Text>
+              </TouchableOpacity>
+              {showNewMenu && (
+                <View style={styles.dropdown}>
+                  {WORK_TYPES.map(t => (
+                    <TouchableOpacity key={t} style={styles.dropdownItem} onPress={() => goNew(t)}>
+                      <Text style={styles.dropdownText}>{t}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </View>
             <TouchableOpacity style={styles.genListBtn} onPress={() => navigation.navigate('GeneratorMaster', {})}>
               <Text style={styles.genListBtnText}>🔧 発電機台帳</Text>
             </TouchableOpacity>
@@ -176,6 +194,19 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f3f4f6' },
   topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
   topBarTitle: { fontSize: 20, fontWeight: '800', color: C },
+  dropdown: {
+    position: 'absolute', top: 44, right: 0, backgroundColor: '#fff',
+    borderRadius: 12, minWidth: 140, zIndex: 999,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15, shadowRadius: 12, elevation: 8,
+    borderWidth: 1, borderColor: '#e2e8f0',
+    overflow: 'hidden',
+  },
+  dropdownItem: {
+    paddingVertical: 12, paddingHorizontal: 16,
+    borderBottomWidth: 1, borderBottomColor: '#f1f5f9',
+  },
+  dropdownText: { fontSize: 14, fontWeight: '600', color: '#0f172a' },
   newBtn: { backgroundColor: C, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
   newBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
   genListBtn: { backgroundColor: '#f3f4f6', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#d1d5db' },

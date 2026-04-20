@@ -44,28 +44,43 @@ export default function TeamMemberScreen({ route }: Props) {
 
   const fetchData = useCallback(async () => {
     try {
-      const [membersRes, companyRes] = await Promise.all([
-        supabase
-          .from('project_members')
-          .select('*, profile:profiles(id, full_name, email, role)')
-          .eq('project_id', projectId),
-        supabase
+      // project_membersを取得
+      const { data: memberRows, error: memberErr } = await supabase
+        .from('project_members')
+        .select('*')
+        .eq('project_id', projectId);
+      if (memberErr) throw memberErr;
+
+      // profilesを別途取得してマージ
+      const userIds = (memberRows ?? []).map((m: any) => m.user_id);
+      let profileMap: Record<string, any> = {};
+      if (userIds.length > 0) {
+        const { data: profileRows } = await supabase
           .from('profiles')
-          .select('*')
-          .order('full_name'),
-      ]);
+          .select('id, full_name, email, role')
+          .in('id', userIds);
+        (profileRows ?? []).forEach((p: any) => { profileMap[p.id] = p; });
+      }
 
-      if (membersRes.error) throw membersRes.error;
-      setMembers((membersRes.data ?? []) as ProjectMember[]);
+      const merged = (memberRows ?? []).map((m: any) => ({
+        ...m,
+        profile: profileMap[m.user_id] ?? null,
+      }));
+      setMembers(merged as ProjectMember[]);
 
-      const memberIds = new Set((membersRes.data ?? []).map((m) => m.user_id));
+      // 追加可能なメンバー（まだ案件に入っていない人）
+      const memberIdSet = new Set(userIds);
+      const { data: allProfiles } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('full_name');
       setCompanyMembers(
-        ((companyRes.data ?? []) as Profile[]).filter((p) => !memberIds.has(p.id))
+        ((allProfiles ?? []) as Profile[]).filter((p) => !memberIdSet.has(p.id))
       );
     } catch (e: any) {
       Alert.alert('エラー', e.message ?? 'データ取得に失敗しました');
     }
-  }, [projectId, profile]);
+  }, [projectId]);
 
   useFocusEffect(
     useCallback(() => {

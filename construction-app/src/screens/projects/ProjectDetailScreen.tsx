@@ -86,26 +86,30 @@ export default function ProjectDetailScreen({ route, navigation }: Props) {
     ]);
   };
 
-  const handleCopy = () => {
-    Alert.alert('案件をコピー', `「${project?.name}」をコピーして新規作成しますか？`, [
-      { text: 'キャンセル', style: 'cancel' },
-      { text: 'コピー', onPress: async () => {
-        if (!project) return;
-        const { data, error } = await supabase.from('projects').insert({
-          name: `${project.name}（コピー）`, description: project.description,
-          status: 'planning', start_date: project.start_date, end_date: project.end_date,
-          company_id: project.company_id, created_by: profile?.id,
-          address: project.address, building_type: project.building_type,
-          parking_info: project.parking_info, work_period: project.work_period,
-          weekend_work: project.weekend_work, smoking_rule: project.smoking_rule,
+  const handleCopy = async () => {
+    if (!project) return;
+    const confirmed = Platform.OS === 'web'
+      ? window.confirm(`「${project.name}」をコピーして新規作成しますか？`)
+      : await new Promise<boolean>(resolve =>
+          Alert.alert('案件をコピー', `「${project.name}」をコピーして新規作成しますか？`, [
+            { text: 'キャンセル', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'コピー', onPress: () => resolve(true) },
+          ])
+        );
+    if (!confirmed) return;
+    const { data, error } = await supabase.from('projects').insert({
+      name: `${project.name}（コピー）`, description: project.description,
+      status: 'planning', start_date: project.start_date, end_date: project.end_date,
+      company_id: project.company_id, created_by: profile?.id,
+      address: project.address, building_type: project.building_type,
+      parking_info: project.parking_info, work_period: project.work_period,
+      weekend_work: project.weekend_work, smoking_rule: project.smoking_rule,
           other_notes: project.other_notes, customer_type: project.customer_type,
           customer_company: project.customer_company, customer_contact: project.customer_contact,
           customer_phone: project.customer_phone,
         }).select().single();
-        if (error) Alert.alert('エラー', 'コピーに失敗しました');
-        else { Alert.alert('完了', '案件をコピーしました'); navigation.navigate('ProjectDetail', { projectId: data.id }); }
-      }},
-    ]);
+    if (error) Alert.alert('エラー', 'コピーに失敗しました');
+    else { Alert.alert('完了', '案件をコピーしました'); navigation.navigate('ProjectDetail', { projectId: data.id }); }
   };
 
   const openMap = (address: string) =>

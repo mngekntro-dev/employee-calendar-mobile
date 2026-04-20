@@ -52,7 +52,7 @@ export default function TeamMemberScreen({ route }: Props) {
         supabase
           .from('profiles')
           .select('*')
-          .eq('company_id', profile!.company_id),
+          .order('full_name'),
       ]);
 
       if (membersRes.error) throw membersRes.error;
@@ -158,16 +158,6 @@ export default function TeamMemberScreen({ route }: Props) {
             title="既存メンバーを追加"
             onPress={() => setAddModalVisible(true)}
             variant="secondary"
-            style={styles.actionBtn}
-            disabled={companyMembers.length === 0}
-          />
-          <Button
-            title="招待リンクを生成"
-            onPress={() => {
-              setInviteLink('');
-              setInviteModalVisible(true);
-            }}
-            variant="primary"
             style={styles.actionBtn}
           />
         </View>

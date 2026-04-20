@@ -1,28 +1,24 @@
 import React, { useCallback, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  Alert,
-  TouchableOpacity,
-  Modal,
-  ScrollView,
-  RefreshControl,
+  View, Text, StyleSheet, FlatList, Alert,
+  TouchableOpacity, Modal, ScrollView, RefreshControl, Platform,
 } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
-import { Profile, ProjectMember, UserRole, ROLE_LABEL } from '../../types';
-import Card from '../../components/Card';
-import Button from '../../components/Button';
-import Badge from '../../components/Badge';
+import { Profile, ProjectMember } from '../../types';
 import LoadingOverlay from '../../components/LoadingOverlay';
 
-interface Props {
-  route: any;
-}
+const ROLE_COLOR: Record<string, { bg: string; text: string }> = {
+  admin:    { bg: '#fef3c7', text: '#92400e' },
+  employee: { bg: '#dcfce7', text: '#166534' },
+  partner:  { bg: '#ede9fe', text: '#5b21b6' },
+};
+const ROLE_LABEL: Record<string, string> = {
+  admin: '管理者', employee: '社員', partner: '協力会社',
+};
+
+interface Props { route: any; }
 
 export default function TeamMemberScreen({ route }: Props) {
   const { projectId } = route.params;
@@ -33,10 +29,6 @@ export default function TeamMemberScreen({ route }: Props) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [addModalVisible, setAddModalVisible] = useState(false);
-  const [inviteModalVisible, setInviteModalVisible] = useState(false);
-  const [inviteLink, setInviteLink] = useState('');
-  const [inviteRole, setInviteRole] = useState<UserRole>('partner');
-  const [generatingLink, setGeneratingLink] = useState(false);
 
   const isAdmin = profile?.role === 'admin';
   const isEmployee = profile?.role === 'employee';
@@ -44,36 +36,26 @@ export default function TeamMemberScreen({ route }: Props) {
 
   const fetchData = useCallback(async () => {
     try {
-      // project_membersを取得
       const { data: memberRows, error: memberErr } = await supabase
-        .from('project_members')
-        .select('*')
-        .eq('project_id', projectId);
+        .from('project_members').select('*').eq('project_id', projectId);
       if (memberErr) throw memberErr;
 
-      // profilesを別途取得してマージ
       const userIds = (memberRows ?? []).map((m: any) => m.user_id);
       let profileMap: Record<string, any> = {};
       if (userIds.length > 0) {
         const { data: profileRows } = await supabase
-          .from('profiles')
-          .select('id, full_name, email, role')
-          .in('id', userIds);
+          .from('profiles').select('id, full_name, email, role').in('id', userIds);
         (profileRows ?? []).forEach((p: any) => { profileMap[p.id] = p; });
       }
 
       const merged = (memberRows ?? []).map((m: any) => ({
-        ...m,
-        profile: profileMap[m.user_id] ?? null,
+        ...m, profile: profileMap[m.user_id] ?? null,
       }));
       setMembers(merged as ProjectMember[]);
 
-      // 追加可能なメンバー（まだ案件に入っていない人）
       const memberIdSet = new Set(userIds);
       const { data: allProfiles } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('full_name');
+        .from('profiles').select('*').order('full_name');
       setCompanyMembers(
         ((allProfiles ?? []) as Profile[]).filter((p) => !memberIdSet.has(p.id))
       );
@@ -82,20 +64,15 @@ export default function TeamMemberScreen({ route }: Props) {
     }
   }, [projectId]);
 
-  useFocusEffect(
-    useCallback(() => {
-      setLoading(true);
-      fetchData().finally(() => setLoading(false));
-    }, [fetchData])
-  );
+  useFocusEffect(useCallback(() => {
+    setLoading(true);
+    fetchData().finally(() => setLoading(false));
+  }, [fetchData]));
 
   const addMember = async (userId: string) => {
     try {
       const { error } = await supabase.from('project_members').insert({
-        project_id: projectId,
-        user_id: userId,
-        role: 'member',
-        added_by: profile?.id,
+        project_id: projectId, user_id: userId, role: 'member', added_by: profile?.id,
       });
       if (error) throw error;
       setAddModalVisible(false);
@@ -106,219 +83,122 @@ export default function TeamMemberScreen({ route }: Props) {
   };
 
   const removeMember = (member: ProjectMember) => {
-    Alert.alert(
-      'メンバーを削除',
-      `${member.profile?.full_name} をこの案件から削除しますか？`,
-      [
+    const doRemove = async () => {
+      const { error } = await supabase.from('project_members').delete()
+        .eq('project_id', projectId).eq('user_id', member.user_id);
+      if (error) Alert.alert('エラー', '削除に失敗しました');
+      else await fetchData();
+    };
+    if (Platform.OS === 'web') {
+      if (window.confirm(`${member.profile?.full_name} をこの案件から削除しますか？`)) doRemove();
+    } else {
+      Alert.alert('メンバーを削除', `${member.profile?.full_name} をこの案件から削除しますか？`, [
         { text: 'キャンセル', style: 'cancel' },
-        {
-          text: '削除',
-          style: 'destructive',
-          onPress: async () => {
-            const { error } = await supabase
-              .from('project_members')
-              .delete()
-              .eq('project_id', projectId)
-              .eq('user_id', member.user_id);
-            if (error) Alert.alert('エラー', '削除に失敗しました');
-            else await fetchData();
-          },
-        },
-      ]
-    );
-  };
-
-  const generateInviteLink = async () => {
-    setGeneratingLink(true);
-    try {
-      const { data, error } = await supabase
-        .from('invitations')
-        .insert({
-          role: inviteRole,
-          company_id: profile?.company_id,
-          project_id: projectId,
-          invited_by: profile?.id,
-          expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-      const link = `construction-app://invite/${data.token}`;
-      setInviteLink(link);
-    } catch (e: any) {
-      Alert.alert('エラー', '招待リンクの生成に失敗しました');
-    } finally {
-      setGeneratingLink(false);
+        { text: '削除', style: 'destructive', onPress: doRemove },
+      ]);
     }
-  };
-
-  const copyLink = async () => {
-    await Clipboard.setStringAsync(inviteLink);
-    Alert.alert('コピー完了', '招待リンクをクリップボードにコピーしました');
   };
 
   if (loading) return <LoadingOverlay />;
 
-  const INVITE_ROLES: UserRole[] = isAdmin
-    ? ['admin', 'employee', 'partner']
-    : ['employee', 'partner'];
-
   return (
     <View style={styles.container}>
-      {/* アクション */}
-      {canManage && (
-        <View style={styles.actions}>
-          <Button
-            title="既存メンバーを追加"
-            onPress={() => setAddModalVisible(true)}
-            variant="secondary"
-            style={styles.actionBtn}
-          />
-        </View>
-      )}
-
-      {/* メンバー一覧 */}
       <FlatList
         data={members}
         keyExtractor={(item) => item.user_id}
         contentContainerStyle={styles.list}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => {
-          setRefreshing(true);
-          await fetchData();
-          setRefreshing(false);
+          setRefreshing(true); await fetchData(); setRefreshing(false);
         }} />}
-        renderItem={({ item }) => (
-          <Card style={styles.memberCard}>
-            <View style={styles.memberRow}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>
-                  {(item.profile?.full_name ?? 'U')[0]}
-                </Text>
+        ListHeaderComponent={
+          <View style={styles.header}>
+            <View>
+              <Text style={styles.headerTitle}>チームメンバー</Text>
+              <Text style={styles.headerSub}>{members.length}名が参加中</Text>
+            </View>
+            {canManage && (
+              <TouchableOpacity style={styles.addBtn} onPress={() => setAddModalVisible(true)}>
+                <Text style={styles.addBtnText}>＋ 追加</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        }
+        renderItem={({ item }) => {
+          const r = item.profile?.role ?? 'employee';
+          const color = ROLE_COLOR[r] ?? ROLE_COLOR.employee;
+          const initial = (item.profile?.full_name ?? 'U')[0];
+          return (
+            <View style={styles.card}>
+              <View style={[styles.avatar, { backgroundColor: color.bg }]}>
+                <Text style={[styles.avatarText, { color: color.text }]}>{initial}</Text>
               </View>
-              <View style={styles.memberInfo}>
-                <Text style={styles.memberName}>{item.profile?.full_name ?? '不明'}</Text>
-                <Text style={styles.memberEmail}>{item.profile?.email}</Text>
+              <View style={styles.info}>
+                <View style={styles.nameRow}>
+                  <Text style={styles.name}>{item.profile?.full_name ?? '不明'}</Text>
+                  {item.user_id === profile?.id && (
+                    <View style={styles.meBadge}><Text style={styles.meBadgeText}>自分</Text></View>
+                  )}
+                </View>
+                <Text style={styles.email}>{item.profile?.email}</Text>
               </View>
-              <View style={styles.memberRight}>
-                {item.profile?.role && <Badge role={item.profile.role} />}
+              <View style={styles.right}>
+                <View style={[styles.roleBadge, { backgroundColor: color.bg }]}>
+                  <Text style={[styles.roleText, { color: color.text }]}>{ROLE_LABEL[r] ?? r}</Text>
+                </View>
                 {canManage && item.user_id !== profile?.id && (
-                  <TouchableOpacity
-                    style={styles.removeBtn}
-                    onPress={() => removeMember(item)}
-                  >
+                  <TouchableOpacity style={styles.removeBtn} onPress={() => removeMember(item)}>
                     <Text style={styles.removeBtnText}>削除</Text>
                   </TouchableOpacity>
                 )}
               </View>
             </View>
-          </Card>
-        )}
+          );
+        }}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={styles.emptyText}>メンバーがいません</Text>
+            <Text style={styles.emptyIcon}>👥</Text>
+            <Text style={styles.emptyTitle}>メンバーがいません</Text>
+            <Text style={styles.emptySub}>「＋ 追加」からメンバーを追加してください</Text>
           </View>
-        }
-        ListHeaderComponent={
-          <Text style={styles.sectionTitle}>メンバー一覧（{members.length}名）</Text>
         }
       />
 
-      {/* 既存メンバー追加モーダル */}
+      {/* メンバー追加モーダル */}
       <Modal visible={addModalVisible} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modal}>
-            <Text style={styles.modalTitle}>メンバーを追加</Text>
-            <ScrollView>
+        <View style={styles.overlay}>
+          <View style={styles.sheet}>
+            <View style={styles.sheetHeader}>
+              <TouchableOpacity onPress={() => setAddModalVisible(false)} style={styles.closeBtn}>
+                <Text style={styles.closeBtnText}>✕</Text>
+              </TouchableOpacity>
+              <Text style={styles.sheetTitle}>メンバーを追加</Text>
+              <View style={{ width: 32 }} />
+            </View>
+            <ScrollView contentContainerStyle={styles.sheetBody}>
               {companyMembers.length === 0 ? (
-                <Text style={styles.emptyText}>追加できるメンバーがいません</Text>
+                <View style={styles.empty}>
+                  <Text style={styles.emptyTitle}>追加できるメンバーがいません</Text>
+                </View>
               ) : (
-                companyMembers.map((p) => (
-                  <TouchableOpacity
-                    key={p.id}
-                    style={styles.memberOption}
-                    onPress={() => addMember(p.id)}
-                  >
-                    <View style={styles.memberOptionLeft}>
-                      <Text style={styles.memberName}>{p.full_name}</Text>
-                      <Text style={styles.memberEmail}>{p.email}</Text>
-                    </View>
-                    <Badge role={p.role} />
-                  </TouchableOpacity>
-                ))
+                companyMembers.map((p) => {
+                  const c = ROLE_COLOR[p.role ?? 'employee'] ?? ROLE_COLOR.employee;
+                  return (
+                    <TouchableOpacity key={p.id} style={styles.option} onPress={() => addMember(p.id)}>
+                      <View style={[styles.optionAvatar, { backgroundColor: c.bg }]}>
+                        <Text style={[styles.optionAvatarText, { color: c.text }]}>{p.full_name[0]}</Text>
+                      </View>
+                      <View style={styles.optionInfo}>
+                        <Text style={styles.optionName}>{p.full_name}</Text>
+                        <Text style={styles.optionEmail}>{p.email}</Text>
+                      </View>
+                      <View style={[styles.roleBadge, { backgroundColor: c.bg }]}>
+                        <Text style={[styles.roleText, { color: c.text }]}>{ROLE_LABEL[p.role ?? 'employee']}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })
               )}
             </ScrollView>
-            <Button
-              title="キャンセル"
-              onPress={() => setAddModalVisible(false)}
-              variant="ghost"
-              fullWidth
-              style={styles.modalBtn}
-            />
-          </View>
-        </View>
-      </Modal>
-
-      {/* 招待リンク生成モーダル */}
-      <Modal visible={inviteModalVisible} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modal}>
-            <Text style={styles.modalTitle}>招待リンクを生成</Text>
-
-            <Text style={styles.label}>招待する役割</Text>
-            <View style={styles.roleGrid}>
-              {INVITE_ROLES.map((r) => (
-                <TouchableOpacity
-                  key={r}
-                  style={[styles.roleOption, inviteRole === r && styles.roleSelected]}
-                  onPress={() => setInviteRole(r)}
-                >
-                  <Text style={[styles.roleOptionText, inviteRole === r && styles.roleSelectedText]}>
-                    {ROLE_LABEL[r]}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {!inviteLink ? (
-              <Button
-                title="リンクを生成"
-                onPress={generateInviteLink}
-                loading={generatingLink}
-                fullWidth
-                style={styles.modalBtn}
-              />
-            ) : (
-              <View>
-                <View style={styles.linkBox}>
-                  <Text style={styles.linkText} numberOfLines={2}>{inviteLink}</Text>
-                </View>
-                <Text style={styles.expireNote}>※ このリンクは7日間有効です</Text>
-                <Button
-                  title="📋 リンクをコピー"
-                  onPress={copyLink}
-                  fullWidth
-                  style={styles.modalBtn}
-                />
-                <Button
-                  title="別のリンクを生成"
-                  onPress={() => setInviteLink('')}
-                  variant="secondary"
-                  fullWidth
-                  style={styles.modalBtn}
-                />
-              </View>
-            )}
-
-            <Button
-              title="閉じる"
-              onPress={() => {
-                setInviteModalVisible(false);
-                setInviteLink('');
-              }}
-              variant="ghost"
-              fullWidth
-            />
           </View>
         </View>
       </Modal>
@@ -327,93 +207,63 @@ export default function TeamMemberScreen({ route }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9fafb' },
-  actions: {
-    flexDirection: 'row',
-    gap: 10,
-    padding: 16,
-    paddingBottom: 0,
+  container: { flex: 1, backgroundColor: '#f8fafc' },
+  list: { padding: 16, paddingBottom: 40, maxWidth: 720, width: '100%', alignSelf: 'center' as any },
+
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
+  headerTitle: { fontSize: 20, fontWeight: '800', color: '#0f172a' },
+  headerSub: { fontSize: 13, color: '#94a3b8', marginTop: 2 },
+  addBtn: { backgroundColor: '#059669', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20 },
+  addBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+
+  card: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#fff', borderRadius: 16,
+    padding: 14, marginBottom: 10,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06, shadowRadius: 4, elevation: 2,
   },
-  actionBtn: { flex: 1 },
-  list: { padding: 16 },
-  sectionTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#374151',
-    marginBottom: 12,
+  avatar: { width: 48, height: 48, borderRadius: 24, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  avatarText: { fontSize: 20, fontWeight: '800' },
+  info: { flex: 1 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  name: { fontSize: 15, fontWeight: '700', color: '#0f172a' },
+  meBadge: { backgroundColor: '#dbeafe', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 10 },
+  meBadgeText: { fontSize: 11, fontWeight: '700', color: '#1d4ed8' },
+  email: { fontSize: 12, color: '#94a3b8', marginTop: 2 },
+  right: { alignItems: 'flex-end', gap: 6 },
+  roleBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+  roleText: { fontSize: 12, fontWeight: '700' },
+  removeBtn: { paddingHorizontal: 10, paddingVertical: 5, backgroundColor: '#fee2e2', borderRadius: 8 },
+  removeBtnText: { color: '#dc2626', fontSize: 12, fontWeight: '700' },
+
+  empty: { alignItems: 'center', paddingVertical: 48 },
+  emptyIcon: { fontSize: 40, marginBottom: 12 },
+  emptyTitle: { fontSize: 16, fontWeight: '700', color: '#64748b', marginBottom: 4 },
+  emptySub: { fontSize: 13, color: '#94a3b8', textAlign: 'center' },
+
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  sheet: {
+    backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    maxHeight: '85%',
   },
-  memberCard: { marginBottom: 8 },
-  memberRow: { flexDirection: 'row', alignItems: 'center' },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#1a56db',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
+  sheetHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    padding: 20, borderBottomWidth: 1, borderBottomColor: '#f1f5f9',
   },
-  avatarText: { color: '#fff', fontSize: 18, fontWeight: '700' },
-  memberInfo: { flex: 1 },
-  memberName: { fontSize: 15, fontWeight: '700', color: '#111827' },
-  memberEmail: { fontSize: 13, color: '#9ca3af' },
-  memberRight: { alignItems: 'flex-end', gap: 6 },
-  removeBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    backgroundColor: '#fde8e8',
-    borderRadius: 6,
+  closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center' },
+  closeBtnText: { fontSize: 14, color: '#64748b', fontWeight: '700' },
+  sheetTitle: { fontSize: 17, fontWeight: '800', color: '#0f172a' },
+  sheetBody: { padding: 16, paddingBottom: 40 },
+
+  option: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 12, paddingHorizontal: 4,
+    borderBottomWidth: 1, borderBottomColor: '#f1f5f9',
   },
-  removeBtnText: { color: '#c81e1e', fontSize: 13, fontWeight: '600' },
-  empty: { alignItems: 'center', marginTop: 40 },
-  emptyText: { color: '#9ca3af', fontSize: 15 },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'flex-end',
-  },
-  modal: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 24,
-    maxHeight: '80%',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#111827',
-    marginBottom: 20,
-  },
-  modalBtn: { marginBottom: 10 },
-  memberOption: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  memberOptionLeft: { flex: 1, marginRight: 8 },
-  label: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 8 },
-  roleGrid: { flexDirection: 'row', gap: 8, marginBottom: 20, flexWrap: 'wrap' },
-  roleOption: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
-    borderWidth: 1.5,
-    borderColor: '#d1d5db',
-    backgroundColor: '#f9fafb',
-  },
-  roleSelected: { borderColor: '#1a56db', backgroundColor: '#eff6ff' },
-  roleOptionText: { fontSize: 14, fontWeight: '600', color: '#6b7280' },
-  roleSelectedText: { color: '#1a56db' },
-  linkBox: {
-    backgroundColor: '#f3f4f6',
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 6,
-  },
-  linkText: { fontSize: 13, color: '#374151', fontFamily: 'monospace' },
-  expireNote: { fontSize: 12, color: '#9ca3af', marginBottom: 14 },
+  optionAvatar: { width: 42, height: 42, borderRadius: 21, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  optionAvatarText: { fontSize: 18, fontWeight: '800' },
+  optionInfo: { flex: 1 },
+  optionName: { fontSize: 15, fontWeight: '700', color: '#0f172a' },
+  optionEmail: { fontSize: 12, color: '#94a3b8', marginTop: 2 },
 });

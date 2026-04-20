@@ -238,7 +238,7 @@ export default function ProjectListScreen({ navigation }: Props) {
           >
             <Text style={[styles.chipText, filterMyOnly && styles.chipTextActive]}>担当案件のみ</Text>
           </TouchableOpacity>
-          {allMembers.map((m) => (
+          {allMembers.filter(m => m.id !== profile?.id).map((m) => (
             <TouchableOpacity
               key={m.id}
               style={[styles.chip, filterMembers.includes(m.id) && styles.chipActive]}
@@ -392,7 +392,7 @@ export default function ProjectListScreen({ navigation }: Props) {
         </View>
         <Text style={styles.filterTitle}>個人名</Text>
         <View style={styles.chipRow}>
-          {allMembers.map((m) => (
+          {allMembers.filter(m => m.id !== profile?.id).map((m) => (
             <TouchableOpacity
               key={m.id}
               style={[styles.chip, filterMembers.includes(m.id) && styles.chipActive]}

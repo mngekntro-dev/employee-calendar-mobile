@@ -13,24 +13,38 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 export const EmployeeListScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
-  const [selectedDept, setSelectedDept] = useState<number | null>(null);
+  const [selectedDeptIds, setSelectedDeptIds] = useState<Set<number>>(new Set());
 
   const { data: departments = [] } = useQuery({ queryKey: ['departments'], queryFn: getDepartments });
-  const { data: employees = [], isLoading } = useQuery({
-    queryKey: ['employees', selectedDept],
-    queryFn: () => getEmployees(selectedDept ?? undefined),
-  });
+  const { data: employees = [], isLoading } = useQuery({ queryKey: ['employees'], queryFn: () => getEmployees() });
+
+  const toggleDept = (id: number) => {
+    setSelectedDeptIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const filteredEmployees =
+    selectedDeptIds.size === 0
+      ? employees
+      : employees.filter((employee) => employee.department_id != null && selectedDeptIds.has(employee.department_id));
 
   return (
     <View style={styles.container}>
-      <DepartmentFilter departments={departments} selected={selectedDept} onSelect={setSelectedDept} />
+      <DepartmentFilter departments={departments} selectedIds={selectedDeptIds} onToggle={toggleDept} />
       {isLoading ? (
         <ActivityIndicator style={{ marginTop: 40 }} color="#3B82F6" />
-      ) : employees.length === 0 ? (
+      ) : filteredEmployees.length === 0 ? (
         <Text style={styles.empty}>社員が見つかりません</Text>
       ) : (
         <FlatList
-          data={employees}
+          data={filteredEmployees}
           keyExtractor={(item) => item.id.toString()}
           renderItem={({ item }) => (
             <EmployeeCard

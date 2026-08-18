@@ -41,8 +41,8 @@ export const CalendarScreen: React.FC = () => {
   const today = fmt(new Date());
   const [selectedDate, setSelectedDate] = useState(today);
   const [viewMode, setViewMode] = useState<ViewMode>('month');
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | null>(null);
-  const [selectedDeptId, setSelectedDeptId] = useState<number | null>(null);
+  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<Set<number>>(new Set());
+  const [selectedDeptIds, setSelectedDeptIds] = useState<Set<number>>(new Set());
   const [sidebarTodos, setSidebarTodos] = useState<TodoItem[]>([]);
   const [pendingAlerts, setPendingAlerts] = useState<{ todo: TodoItem; daysLeft: number; deadlineStr: string }[]>([]);
   const [currentAlert, setCurrentAlert] = useState<{ todo: TodoItem; daysLeft: number; deadlineStr: string } | null>(null);
@@ -133,26 +133,68 @@ export const CalendarScreen: React.FC = () => {
     queryFn: getDepartments,
   });
 
+  // 部署・社員データ取得後、デフォルトで全部署・全員をONにする
+  useEffect(() => {
+    if (departments.length > 0) {
+      setSelectedDeptIds(new Set(departments.map((d) => d.id)));
+    }
+  }, [departments]);
+
+  useEffect(() => {
+    if (allEmployees.length > 0) {
+      setSelectedEmployeeIds(new Set(allEmployees.map((e) => e.id)));
+    }
+  }, [allEmployees]);
+
   const employees = useMemo(
-    () => (selectedDeptId ? allEmployees.filter((employee) => employee.department_id === selectedDeptId) : allEmployees),
-    [allEmployees, selectedDeptId]
+    () => allEmployees.filter((employee) => employee.department_id == null || selectedDeptIds.has(employee.department_id)),
+    [allEmployees, selectedDeptIds]
   );
 
-  const handleDeptSelect = (id: number | null) => {
-    setSelectedDeptId(id);
-    setSelectedEmployeeId(null);
+  const toggleDept = (id: number) => {
+    setSelectedDeptIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+    // 部署OFFに伴い、その部署に属する社員も選択から外す
+    setSelectedEmployeeIds((prev) => {
+      const willBeOn = !selectedDeptIds.has(id);
+      if (willBeOn) return prev;
+      const next = new Set(prev);
+      allEmployees.forEach((employee) => {
+        if (employee.department_id === id) next.delete(employee.id);
+      });
+      return next;
+    });
+  };
+
+  const toggleEmployee = (id: number) => {
+    setSelectedEmployeeIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
   };
 
   const schedules = useMemo(() => {
-    let result = allSchedules;
-    if (selectedEmployeeId) {
-      result = result.filter((schedule) => schedule.user_id === selectedEmployeeId);
-    } else if (selectedDeptId) {
-      const ids = new Set(allEmployees.filter((employee) => employee.department_id === selectedDeptId).map((employee) => employee.id));
-      result = result.filter((schedule) => ids.has(schedule.user_id));
-    }
-    return result;
-  }, [allSchedules, allEmployees, selectedEmployeeId, selectedDeptId]);
+    const visibleEmployeeIds = new Set(
+      allEmployees
+        .filter((employee) => employee.department_id == null || selectedDeptIds.has(employee.department_id))
+        .map((employee) => employee.id)
+    );
+    return allSchedules.filter(
+      (schedule) => visibleEmployeeIds.has(schedule.user_id) && selectedEmployeeIds.has(schedule.user_id)
+    );
+  }, [allSchedules, allEmployees, selectedDeptIds, selectedEmployeeIds]);
 
   const shiftWeek = (dir: 1 | -1) => {
     const date = new Date(selectedDate);
@@ -232,10 +274,10 @@ export const CalendarScreen: React.FC = () => {
           <View style={styles.sidebar}>
             <ScrollView showsVerticalScrollIndicator={false}>
               <Text style={styles.sidebarSection}>部署</Text>
-              <DepartmentFilter departments={departments} selected={selectedDeptId} onSelect={handleDeptSelect} />
+              <DepartmentFilter departments={departments} selectedIds={selectedDeptIds} onToggle={toggleDept} />
 
               <Text style={styles.sidebarSection}>社員</Text>
-              <EmployeeSelector employees={employees} selectedId={selectedEmployeeId} onSelect={setSelectedEmployeeId} />
+              <EmployeeSelector employees={employees} selectedIds={selectedEmployeeIds} onToggle={toggleEmployee} />
 
               {sidebarTodos.length > 0 && (
                 <>
@@ -264,8 +306,8 @@ export const CalendarScreen: React.FC = () => {
         </View>
       ) : (
         <>
-          <DepartmentFilter departments={departments} selected={selectedDeptId} onSelect={handleDeptSelect} />
-          <EmployeeSelector employees={employees} selectedId={selectedEmployeeId} onSelect={setSelectedEmployeeId} />
+          <DepartmentFilter departments={departments} selectedIds={selectedDeptIds} onToggle={toggleDept} />
+          <EmployeeSelector employees={employees} selectedIds={selectedEmployeeIds} onToggle={toggleEmployee} />
           {legend}
           {toggleRow}
           {calendarBody}

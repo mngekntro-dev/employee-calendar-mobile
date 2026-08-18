@@ -1,6 +1,8 @@
-import React, { useRef } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Dimensions } from 'react-native';
+import React, { useMemo, useRef } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, useWindowDimensions } from 'react-native';
 import { Schedule } from '../types';
+import { getDepartmentColor } from '../constants/departmentColors';
+import { getEmployeeInitial } from '../constants/employeeInitials';
 
 interface Employee { id: number; name: string; color: string | null; }
 interface Props {
@@ -10,23 +12,22 @@ interface Props {
   onDayPress: (date: string) => void;
   onPrevWeek: () => void;
   onNextWeek: () => void;
-  onAddPress?: () => void;
 }
 
 const fmt = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-const todayStr = fmt(new Date());
 const DAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
 const HOUR_HEIGHT = 60;
 const START_HOUR = 0;
 const END_HOUR = 24;
 const TIME_COL_W = 32;
-const { width } = Dimensions.get('window');
-const DAY_COL_W = Math.floor((width - TIME_COL_W) / 7);
 
 export const WeekView: React.FC<Props> = ({
   selectedDate, schedules, employees, onDayPress, onPrevWeek, onNextWeek,
 }) => {
+  const { width } = useWindowDimensions();
+  const DAY_COL_W = Math.floor((width - TIME_COL_W) / 7);
+  const todayStr = useMemo(() => fmt(new Date()), []);
   const empMap: Record<number, { name: string; color: string }> = {};
   employees.forEach(e => { empMap[e.id] = { name: e.name, color: e.color || '#3B82F6' }; });
 
@@ -153,7 +154,7 @@ export const WeekView: React.FC<Props> = ({
                 {/* 予定ブロック */}
                 {daySchedules.map((s, si) => {
                   const emp = empMap[s.user_id];
-                  const color = emp?.color || '#3B82F6';
+                  const color = getDepartmentColor(s.department_name);
                   const { top, height } = getEventStyle(s);
                   return (
                     <View key={si} style={{
@@ -168,7 +169,7 @@ export const WeekView: React.FC<Props> = ({
                       overflow: 'hidden',
                     }}>
                       <Text style={{ fontSize: 8, color: '#fff', fontWeight: '600' }} numberOfLines={3}>
-                        {emp?.name?.[0] ? `${emp.name[0]} ` : ''}{s.title}
+                        {`${getEmployeeInitial(emp?.name)} ${s.title}`}
                       </Text>
                     </View>
                   );

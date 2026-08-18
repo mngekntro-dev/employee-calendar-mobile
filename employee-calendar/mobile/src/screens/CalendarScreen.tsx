@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView, useWindowDimensions } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -12,9 +12,10 @@ import { DepartmentFilter } from '../components/DepartmentFilter';
 import { getSchedules } from '../api/schedules';
 import { getEmployees } from '../api/employees';
 import { getDepartments } from '../api/departments';
-import { RootStackParamList, Schedule } from '../types';
+import { RootStackParamList } from '../types';
 import { useAuthStore } from '../store/authStore';
 import { STORAGE_KEY, TodoItem } from './TodoScreen';
+import { DEPARTMENT_COLORS } from '../constants/departmentColors';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type ViewMode = 'month' | 'week' | 'day';
@@ -26,8 +27,8 @@ const deadlineLabel = (todo: TodoItem): string => {
   if (!todo.deadlineType) return '';
   if (todo.deadlineType === 'monthly') return `毎月${todo.deadlineDay}日`;
   if (todo.deadlineDate) {
-    const [, m, d] = todo.deadlineDate.split('-');
-    return `${Number(m)}/${Number(d)}`;
+    const [, month, day] = todo.deadlineDate.split('-');
+    return `${Number(month)}/${Number(day)}`;
   }
   return '';
 };
@@ -43,8 +44,6 @@ export const CalendarScreen: React.FC = () => {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | null>(null);
   const [selectedDeptId, setSelectedDeptId] = useState<number | null>(null);
   const [sidebarTodos, setSidebarTodos] = useState<TodoItem[]>([]);
-
-  // TODO ポップアップ
   const [pendingAlerts, setPendingAlerts] = useState<{ todo: TodoItem; daysLeft: number; deadlineStr: string }[]>([]);
   const [currentAlert, setCurrentAlert] = useState<{ todo: TodoItem; daysLeft: number; deadlineStr: string } | null>(null);
 
@@ -64,9 +63,8 @@ export const CalendarScreen: React.FC = () => {
           continue;
         }
 
-        // 担当チェック
         if (todo.assigneeType === 'individual' && !(todo.assigneeUserIds ?? []).includes(user.id)) continue;
-        if (todo.assigneeType === 'department' && !(todo.assigneeDeptIds ?? []).includes(user.department_id!)) continue;
+        if (todo.assigneeType === 'department' && (user.department_id == null || !(todo.assigneeDeptIds ?? []).includes(user.department_id))) continue;
 
         let deadline: Date | null = null;
         let deadlineStr = '';
@@ -75,14 +73,14 @@ export const CalendarScreen: React.FC = () => {
           deadline = new Date(now.getFullYear(), now.getMonth(), todo.deadlineDay);
           deadlineStr = `${now.getMonth() + 1}/${todo.deadlineDay}`;
         } else if (todo.deadlineType === 'once' && todo.deadlineDate) {
-          const [y, m, d] = todo.deadlineDate.split('-').map(Number);
-          deadline = new Date(y, m - 1, d);
-          deadlineStr = `${m}/${d}`;
+          const [year, month, day] = todo.deadlineDate.split('-').map(Number);
+          deadline = new Date(year, month - 1, day);
+          deadlineStr = `${month}/${day}`;
         }
 
         if (deadline) {
           upcomingTodos.push(todo);
-          const daysLeft = Math.ceil((deadline.getTime() - new Date().setHours(0,0,0,0)) / 86400000);
+          const daysLeft = Math.ceil((deadline.getTime() - new Date().setHours(0, 0, 0, 0)) / 86400000);
           const notifyBefore = todo.notifyDaysBefore ?? 5;
           if (daysLeft >= 0 && daysLeft <= notifyBefore) {
             const dismissKey = `dismissed_${todo.id}_${deadline.getFullYear()}_${deadline.getMonth()}_${todo.deadlineType === 'once' ? deadline.getDate() : ''}`;
@@ -100,7 +98,9 @@ export const CalendarScreen: React.FC = () => {
     } catch (_) {}
   }, [user]);
 
-  useEffect(() => { checkTodoAlerts(); }, [checkTodoAlerts]);
+  useEffect(() => {
+    checkTodoAlerts();
+  }, [checkTodoAlerts]);
 
   const dismissAlert = async () => {
     if (!currentAlert) return;
@@ -110,8 +110,8 @@ export const CalendarScreen: React.FC = () => {
     if (todo.deadlineType === 'monthly' && todo.deadlineDay) {
       deadline = new Date(now.getFullYear(), now.getMonth(), todo.deadlineDay);
     } else {
-      const [y, m, d] = (todo.deadlineDate ?? '').split('-').map(Number);
-      deadline = new Date(y, m - 1, d);
+      const [year, month, day] = (todo.deadlineDate ?? '').split('-').map(Number);
+      deadline = new Date(year, month - 1, day);
     }
     const dismissKey = `dismissed_${todo.id}_${deadline.getFullYear()}_${deadline.getMonth()}_${todo.deadlineType === 'once' ? deadline.getDate() : ''}`;
     await AsyncStorage.setItem(dismissKey, '1');
@@ -134,7 +134,7 @@ export const CalendarScreen: React.FC = () => {
   });
 
   const employees = useMemo(
-    () => selectedDeptId ? allEmployees.filter(e => e.department_id === selectedDeptId) : allEmployees,
+    () => (selectedDeptId ? allEmployees.filter((employee) => employee.department_id === selectedDeptId) : allEmployees),
     [allEmployees, selectedDeptId]
   );
 
@@ -146,18 +146,18 @@ export const CalendarScreen: React.FC = () => {
   const schedules = useMemo(() => {
     let result = allSchedules;
     if (selectedEmployeeId) {
-      result = result.filter(s => s.user_id === selectedEmployeeId);
+      result = result.filter((schedule) => schedule.user_id === selectedEmployeeId);
     } else if (selectedDeptId) {
-      const ids = new Set(allEmployees.filter(e => e.department_id === selectedDeptId).map(e => e.id));
-      result = result.filter(s => ids.has(s.user_id));
+      const ids = new Set(allEmployees.filter((employee) => employee.department_id === selectedDeptId).map((employee) => employee.id));
+      result = result.filter((schedule) => ids.has(schedule.user_id));
     }
     return result;
   }, [allSchedules, allEmployees, selectedEmployeeId, selectedDeptId]);
 
   const shiftWeek = (dir: 1 | -1) => {
-    const d = new Date(selectedDate);
-    d.setDate(d.getDate() + dir * 7);
-    setSelectedDate(fmt(d));
+    const date = new Date(selectedDate);
+    date.setDate(date.getDate() + dir * 7);
+    setSelectedDate(fmt(date));
   };
 
   const handleDayPress = (date: string) => {
@@ -167,7 +167,7 @@ export const CalendarScreen: React.FC = () => {
 
   const toggleRow = (
     <View style={styles.toggleRow}>
-      {(['month', 'week', 'day'] as ViewMode[]).map(mode => {
+      {(['month', 'week', 'day'] as ViewMode[]).map((mode) => {
         const label = mode === 'month' ? '月' : mode === 'week' ? '週' : '日';
         return (
           <TouchableOpacity
@@ -179,6 +179,17 @@ export const CalendarScreen: React.FC = () => {
           </TouchableOpacity>
         );
       })}
+    </View>
+  );
+
+  const legend = (
+    <View style={styles.legendRow}>
+      {Object.entries(DEPARTMENT_COLORS).map(([name, color]) => (
+        <View key={name} style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: color }]} />
+          <Text style={styles.legendText}>{name}</Text>
+        </View>
+      ))}
     </View>
   );
 
@@ -207,7 +218,7 @@ export const CalendarScreen: React.FC = () => {
           date={selectedDate}
           schedules={schedules}
           employees={allEmployees}
-          onSchedulePress={s => navigation.navigate('ScheduleDetail', { schedule: s })}
+          onSchedulePress={(schedule) => navigation.navigate('ScheduleDetail', { schedule })}
           onAddPress={() => navigation.navigate('ScheduleForm', { initialDate: selectedDate })}
         />
       )}
@@ -217,9 +228,7 @@ export const CalendarScreen: React.FC = () => {
   return (
     <View style={styles.container}>
       {isDesktop ? (
-        /* ─── PC 2カラムレイアウト ─── */
         <View style={styles.desktopContainer}>
-          {/* 左サイドバー */}
           <View style={styles.sidebar}>
             <ScrollView showsVerticalScrollIndicator={false}>
               <Text style={styles.sidebarSection}>部署</Text>
@@ -231,12 +240,12 @@ export const CalendarScreen: React.FC = () => {
               {sidebarTodos.length > 0 && (
                 <>
                   <Text style={styles.sidebarSection}>TODO</Text>
-                  {sidebarTodos.map(todo => (
+                  {sidebarTodos.map((todo) => (
                     <View key={todo.id} style={styles.sidebarTodoItem}>
                       <Text style={styles.sidebarTodoText} numberOfLines={2}>{todo.text}</Text>
                       {todo.deadlineType && (
                         <Text style={styles.sidebarTodoDeadline}>
-                          🔔 {deadlineLabel(todo)}
+                          期限 {deadlineLabel(todo)}
                           {todo.notifyDaysBefore ? ` (${todo.notifyDaysBefore}日前)` : ''}
                         </Text>
                       )}
@@ -247,36 +256,35 @@ export const CalendarScreen: React.FC = () => {
             </ScrollView>
           </View>
 
-          {/* メインエリア */}
           <View style={styles.mainArea}>
             {toggleRow}
+            {legend}
             {calendarBody}
           </View>
         </View>
       ) : (
-        /* ─── モバイルレイアウト（変更なし） ─── */
         <>
           <DepartmentFilter departments={departments} selected={selectedDeptId} onSelect={handleDeptSelect} />
           <EmployeeSelector employees={employees} selectedId={selectedEmployeeId} onSelect={setSelectedEmployeeId} />
+          {legend}
           {toggleRow}
           {calendarBody}
         </>
       )}
 
-      {/* TODO リマインダーポップアップ */}
       <Modal visible={!!currentAlert} transparent animationType="fade">
         <View style={styles.alertOverlay}>
           <View style={[styles.alertBox, isDesktop && { maxWidth: 420 }]}>
-            <Text style={styles.alertIcon}>⚠</Text>
+            <Text style={styles.alertIcon}>⏰</Text>
             <Text style={styles.alertTitle}>TODO リマインダー</Text>
             <Text style={styles.alertBody}>
               「{currentAlert?.todo.text}」の期限まで{'\n'}
               {currentAlert?.daysLeft === 0
-                ? `今日（${currentAlert?.deadlineStr}）です`
-                : `あと ${currentAlert?.daysLeft}日（${currentAlert?.deadlineStr}）です`}
+                ? `今日 (${currentAlert?.deadlineStr}) です`
+                : `あと ${currentAlert?.daysLeft}日 (${currentAlert?.deadlineStr}) です`}
             </Text>
             <TouchableOpacity style={styles.alertBtn} onPress={dismissAlert}>
-              <Text style={styles.alertBtnText}>確認</Text>
+              <Text style={styles.alertBtnText}>閉じる</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -287,8 +295,6 @@ export const CalendarScreen: React.FC = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F9FAFB' },
-
-  /* PC レイアウト */
   desktopContainer: { flex: 1, flexDirection: 'row' },
   sidebar: {
     width: 260,
@@ -318,22 +324,49 @@ const styles = StyleSheet.create({
   sidebarTodoText: { fontSize: 13, color: '#374151', fontWeight: '600', marginBottom: 2 },
   sidebarTodoDeadline: { fontSize: 11, color: '#EF4444' },
   mainArea: { flex: 1, overflow: 'hidden' },
-
-  /* 切替タブ */
+  legendRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  legendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 6,
+  },
+  legendText: {
+    fontSize: 12,
+    color: '#4B5563',
+  },
   toggleRow: {
-    flexDirection: 'row', backgroundColor: '#F3F4F6',
-    marginHorizontal: 12, marginVertical: 6, borderRadius: 10, padding: 3,
+    flexDirection: 'row',
+    backgroundColor: '#F3F4F6',
+    marginHorizontal: 12,
+    marginVertical: 6,
+    borderRadius: 10,
+    padding: 3,
   },
   toggleBtn: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 8 },
   toggleBtnActive: {
     backgroundColor: '#fff',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1, shadowRadius: 2, elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   toggleText: { fontSize: 13, color: '#6B7280', fontWeight: '600' },
   toggleTextActive: { color: '#3B82F6' },
-
-  /* ポップアップ */
   alertOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 32 },
   alertBox: { backgroundColor: '#fff', borderRadius: 16, padding: 24, alignItems: 'center', width: '100%' },
   alertIcon: { fontSize: 36, marginBottom: 8 },

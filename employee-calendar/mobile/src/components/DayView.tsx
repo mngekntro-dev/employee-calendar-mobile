@@ -1,6 +1,9 @@
 import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
 import { Schedule } from '../types';
+import { getTaskTypeMetaFromTitle } from '../constants/taskTypes';
+import { getDepartmentColor } from '../constants/departmentColors';
+import { getEmployeeInitial } from '../constants/employeeInitials';
 
 interface Employee { id: number; name: string; color: string | null; }
 interface Props {
@@ -20,15 +23,12 @@ export const DayView: React.FC<Props> = ({ date, schedules, employees, onSchedul
   const empMap: Record<number, { name: string; color: string }> = {};
   employees.forEach(e => { empMap[e.id] = { name: e.name, color: e.color || '#3B82F6' }; });
 
-  const fmt = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
   const daySchedules = schedules
     .filter(s => s.start_at.substring(0, 10) === date)
     .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
 
-  const [y, m, d2] = date.split('-');
-  const label = `${y}/${m}/${d2}`;
+  const [y, m, d] = date.split('-');
+  const label = `${y}/${m}/${d}`;
 
   return (
     <View style={{ flex: 1 }}>
@@ -44,12 +44,14 @@ export const DayView: React.FC<Props> = ({ date, schedules, employees, onSchedul
         ) : (
           daySchedules.map(s => {
             const emp = empMap[s.user_id];
-            const color = emp?.color || '#3B82F6';
+            const taskType = getTaskTypeMetaFromTitle(s.title);
+            const deptColor = getDepartmentColor(s.department_name);
             return (
-              <TouchableOpacity key={s.id} style={[styles.card, { borderLeftColor: color }]} onPress={() => onSchedulePress(s)}>
+              <TouchableOpacity key={s.id} style={[styles.card, { borderLeftColor: deptColor }]} onPress={() => onSchedulePress(s)}>
                 <Text style={styles.time}>{fmtTime(s.start_at)} 〜 {fmtTime(s.end_at)}</Text>
                 <Text style={styles.title}>{s.title}</Text>
-                {emp && <Text style={styles.empName}>{emp.name}</Text>}
+                <Text style={styles.taskType}>{taskType.label}</Text>
+                {emp && <Text style={styles.empName}>{`${getEmployeeInitial(emp.name)} ${emp.name}`}</Text>}
               </TouchableOpacity>
             );
           })
@@ -77,5 +79,6 @@ const styles = StyleSheet.create({
   },
   time: { fontSize: 11, color: '#6B7280', marginBottom: 2 },
   title: { fontSize: 14, fontWeight: '700', color: '#111827' },
+  taskType: { fontSize: 11, color: '#4B5563', marginTop: 4 },
   empName: { fontSize: 12, color: '#6B7280', marginTop: 2 },
 });

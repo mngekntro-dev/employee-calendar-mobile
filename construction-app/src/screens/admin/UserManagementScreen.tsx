@@ -1,151 +1,253 @@
 import React, { useCallback, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, Alert,
-  TouchableOpacity, RefreshControl, Modal, TextInput,
-  ActivityIndicator, ScrollView, Platform,
+  TouchableOpacity, Modal, RefreshControl, TextInput, Platform,
+  ScrollView,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
-import { Profile, ROLE_LABEL } from '../../types';
+import { Profile, UserRole, ROLE_LABEL, Department, DEPARTMENTS } from '../../types';
 import Card from '../../components/Card';
+import Button from '../../components/Button';
 import Badge from '../../components/Badge';
 import LoadingOverlay from '../../components/LoadingOverlay';
+import { syncMemberToCalendar } from '../../lib/syncMember';
 
-const ROLES = ['employee', 'admin', 'partner'] as const;
-type Role = typeof ROLES[number];
-const ROLE_NAMES: Record<Role, string> = { employee: '社員', admin: '管理者', partner: '協力会社' };
+const INVITE_ROLES: UserRole[] = ['admin', 'employee', 'partner'];
+const PRIMARY = '#1a56db';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL ?? 'https://your-backend.railway.app';
+// アプリのWebURL（メール内で案内するURL）
+const APP_URL = process.env.EXPO_PUBLIC_APP_URL ?? 'https://your-app.example.com';
 
 export default function UserManagementScreen() {
   const { profile } = useAuth();
+
   const [users, setUsers] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // 追加モーダル
-  const [addVisible, setAddVisible] = useState(false);
-  const [form, setForm] = useState({ full_name: '', email: '', password: '', role: 'employee' as Role });
-  const [saving, setSaving] = useState(false);
+  // メンバー追加モーダル
+  const [addModalVisible, setAddModalVisible] = useState(false);
+  const [addEmail, setAddEmail] = useState('');
+  const [addPassword, setAddPassword] = useState('');
+  const [addName, setAddName] = useState('');
+  const [addRole, setAddRole] = useState<UserRole>('employee');
+  const [addDepartment, setAddDepartment] = useState<Department | null>(null);
+  const [adding, setAdding] = useState(false);
 
   // 編集モーダル
   const [editTarget, setEditTarget] = useState<Profile | null>(null);
-  const [editForm, setEditForm] = useState({ full_name: '', role: 'employee' as Role, email: '', newPassword: '' });
-  const [editSaving, setEditSaving] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editRole, setEditRole] = useState<UserRole>('employee');
+  const [editDepartment, setEditDepartment] = useState<Department | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // メール送信中のユーザーID
+  const [sendingEmailId, setSendingEmailId] = useState<string | null>(null);
+
+  // 事業部変更中のユーザーID
+  const [updatingDeptId, setUpdatingDeptId] = useState<string | null>(null);
 
   const fetchUsers = useCallback(async () => {
     try {
       const { data, error } = await supabase
-        .from('profiles').select('*')
+        .from('profiles')
+        .select('*')
+        .eq('company_id', profile?.company_id)
         .order('created_at', { ascending: true });
       if (error) throw error;
       setUsers(data as Profile[]);
     } catch {
       Alert.alert('エラー', 'ユーザーの取得に失敗しました');
     }
-  }, []);
+  }, [profile]);
 
-  useFocusEffect(useCallback(() => {
-    setLoading(true);
-    fetchUsers().finally(() => setLoading(false));
-  }, [fetchUsers]));
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      fetchUsers().finally(() => setLoading(false));
+    }, [fetchUsers])
+  );
 
-  const openEdit = (target: Profile) => {
-    setEditTarget(target);
-    setEditForm({ full_name: target.full_name, role: (target.role as Role) ?? 'employee', email: target.email ?? '', newPassword: '' });
+  // ---- メンバー追加 ----
+  const openAddModal = () => {
+    setAddEmail('');
+    setAddPassword('');
+    setAddName('');
+    setAddRole('employee');
+    setAddDepartment(null);
+    setAddModalVisible(true);
   };
 
-  const handleEdit = async () => {
-    if (!editTarget) return;
-    if (!editForm.full_name.trim()) { alert('名前を入力してください'); return; }
-    if (editForm.newPassword && editForm.newPassword.length < 6) { alert('パスワードは6文字以上で入力してください'); return; }
-    setEditSaving(true);
+  const addMember = async () => {
+    if (!addEmail.trim()) { Alert.alert('エラー', 'メールアドレスを入力してください'); return; }
+    if (!addPassword.trim() || addPassword.length < 6) { Alert.alert('エラー', 'パスワードは6文字以上で入力してください'); return; }
+    if (!addName.trim()) { Alert.alert('エラー', '氏名を入力してください'); return; }
+
+    setAdding(true);
     try {
-      // プロフィール更新
-      const updates: any = { full_name: editForm.full_name.trim(), role: editForm.role };
-      if (editForm.email.trim() && editForm.email.trim() !== editTarget.email) {
-        updates.email = editForm.email.trim();
-      }
-      const { error } = await supabase.from('profiles').update(updates).eq('id', editTarget.id);
-      if (error) throw error;
+      // 1) Supabase Auth にユーザー作成
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: addEmail.trim(),
+        password: addPassword.trim(),
+        options: {
+          data: {
+            full_name: addName.trim(),
+            company_id: profile?.company_id,
+            role: addRole,
+            department: addDepartment,
+          },
+        },
+      });
 
-      // メールアドレス変更（Auth側）
-      if (editForm.email.trim() && editForm.email.trim() !== editTarget.email) {
-        await fetch(`${BACKEND_URL}/api/users/${editTarget.id}/password`, {
-          method: 'PUT', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ newEmail: editForm.email.trim() }),
+      if (authError) throw authError;
+
+      const uid = authData.user?.id;
+      if (!uid) throw new Error('ユーザーIDの取得に失敗しました');
+
+      // 2) profiles テーブルを upsert（トリガーで自動作成される場合はスキップ可）
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .upsert({
+          id: uid,
+          email: addEmail.trim(),
+          full_name: addName.trim(),
+          role: addRole,
+          department: addDepartment,
+          company_id: profile?.company_id,
         });
-      }
 
-      // パスワード変更
-      if (editForm.newPassword) {
-        const res = await fetch(`${BACKEND_URL}/api/users/${editTarget.id}/password`, {
-          method: 'PUT', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ newPassword: editForm.newPassword }),
-        });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error ?? 'パスワード変更に失敗しました');
-      }
+      if (profileError) throw profileError;
 
-      setEditTarget(null);
-      fetchUsers();
-      alert('メンバー情報を更新しました');
+      setAddModalVisible(false);
+      await fetchUsers();
+      // Railway カレンダーに非同期で同期（失敗してもメイン操作はブロックしない）
+      syncMemberToCalendar({
+        email: addEmail.trim(),
+        full_name: addName.trim(),
+        role: addRole,
+        department: addDepartment,
+      });
+      Alert.alert('追加完了', `${addName} さんのアカウントを作成しました。\n\nログイン情報をメールで送信するには、メンバー一覧の「メール送信」ボタンを使ってください。`);
     } catch (e: any) {
-      alert('エラー: ' + e.message);
-    } finally { setEditSaving(false); }
-  };
-
-  const deleteUser = (target: Profile) => {
-    if (target.id === profile?.id) { Alert.alert('エラー', '自分自身は削除できません'); return; }
-    const doDelete = async () => {
-      try {
-        // 1. profilesテーブルから削除
-        await supabase.from('profiles').delete().eq('id', target.id);
-        // 2. Auth からも削除（バックエンド経由）
-        await fetch(`${BACKEND_URL}/api/users/${target.id}`, { method: 'DELETE' });
-        fetchUsers();
-        alert(`${target.full_name} を削除しました`);
-      } catch (e: any) {
-        Alert.alert('エラー', '削除に失敗しました');
-      }
-    };
-    if (Platform.OS === 'web') {
-      if (window.confirm(`「${target.full_name}」を削除しますか？`)) doDelete();
-    } else {
-      Alert.alert('メンバーを削除', `${target.full_name} を削除しますか？`, [
-        { text: 'キャンセル', style: 'cancel' },
-        { text: '削除', style: 'destructive', onPress: doDelete },
-      ]);
+      const msg = e?.message ?? 'アカウント作成に失敗しました';
+      Alert.alert('エラー', msg);
+    } finally {
+      setAdding(false);
     }
   };
 
-  const handleAdd = async () => {
-    if (!form.full_name.trim()) { alert('名前を入力してください'); return; }
-    if (!form.email.trim())     { alert('メールアドレスを入力してください'); return; }
-    if (form.password.length < 6) { alert('パスワードは6文字以上で入力してください'); return; }
+  // ---- メール送信（ログイン情報の案内） ----
+  const sendLoginEmail = async (target: Profile) => {
+    setSendingEmailId(target.id);
+    try {
+      // パスワードリセットメールを送信（ログインURLを含む）
+      const { error } = await supabase.auth.resetPasswordForEmail(target.email, {
+        redirectTo: APP_URL,
+      });
+      if (error) throw error;
+      Alert.alert(
+        'メール送信完了',
+        `${target.full_name} さん（${target.email}）にログイン案内メールを送信しました。\n\nメール内のリンクからパスワードを設定し、ログインできます。`
+      );
+    } catch (e: any) {
+      Alert.alert('エラー', e?.message ?? 'メール送信に失敗しました');
+    } finally {
+      setSendingEmailId(null);
+    }
+  };
+
+  // ---- 編集 ----
+  const openEdit = (target: Profile) => {
+    setEditTarget(target);
+    setEditName(target.full_name ?? '');
+    setEditEmail(target.email);
+    setEditRole(target.role);
+    setEditDepartment(target.department ?? null);
+  };
+
+  const saveEdit = async () => {
+    if (!editTarget) return;
+    if (!editName.trim()) { Alert.alert('エラー', '氏名を入力してください'); return; }
     setSaving(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/users/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          full_name: form.full_name.trim(),
-          email: form.email.trim(),
-          password: form.password,
-          role: form.role,
-          company_id: profile?.company_id ?? profile?.id ?? 'sanko',
-        }),
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          full_name: editName.trim(),
+          email: editEmail.trim(),
+          role: editRole,
+          department: editDepartment,
+        })
+        .eq('id', editTarget.id);
+      if (error) throw error;
+      setEditTarget(null);
+      await fetchUsers();
+      // Railway カレンダーに非同期で同期（失敗してもメイン操作はブロックしない）
+      syncMemberToCalendar({
+        email: editEmail.trim(),
+        full_name: editName.trim(),
+        role: editRole,
+        department: editDepartment,
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? 'エラー');
-      setAddVisible(false);
-      setForm({ full_name: '', email: '', password: '', role: 'employee' });
-      fetchUsers();
-      alert('メンバーを追加しました');
+      Alert.alert('更新完了', 'メンバー情報を更新しました');
     } catch (e: any) {
-      alert('エラー: ' + e.message);
-    } finally { setSaving(false); }
+      Alert.alert('エラー', e.message ?? '更新に失敗しました');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ---- 事業部ワンタップ切り替え（電気工事→発電機→経理→電気工事…の順で循環） ----
+  const toggleDepartment = async (target: Profile) => {
+    const currentDept = target.department;
+    const cycle: Record<Department, Department> = {
+      '電気工事事業部': '発電機事業部',
+      '発電機事業部': '経理部',
+      '経理部': '電気工事事業部',
+    };
+    const next: Department = currentDept ? cycle[currentDept] : '電気工事事業部';
+    setUpdatingDeptId(target.id);
+    setUsers((prev) => prev.map((u) => u.id === target.id ? { ...u, department: next } : u));
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .update({ department: next })
+        .eq('id', target.id)
+        .select('id, department');
+      if (error) {
+        console.error('[toggleDepartment] Supabase error:', error);
+        throw error;
+      }
+      if (!data || data.length === 0) {
+        console.error('[toggleDepartment] 0 rows updated — RLSポリシーによりブロックされた可能性があります。target.id:', target.id);
+        throw new Error('事業部の更新に失敗しました（権限エラーの可能性があります）');
+      }
+      console.log('[toggleDepartment] 更新成功:', data[0]);
+    } catch (e: any) {
+      setUsers((prev) => prev.map((u) => u.id === target.id ? { ...u, department: currentDept } : u));
+      Alert.alert('エラー', e.message ?? '事業部の更新に失敗しました');
+    } finally {
+      setUpdatingDeptId(null);
+    }
+  };
+
+  // ---- 削除 ----
+  const deleteUser = (target: Profile) => {
+    if (target.id === profile?.id) { Alert.alert('エラー', '自分自身は削除できません'); return; }
+    Alert.alert('メンバーを削除', `${target.full_name} を削除しますか？`, [
+      { text: 'キャンセル', style: 'cancel' },
+      {
+        text: '削除', style: 'destructive',
+        onPress: async () => {
+          const { error } = await supabase.from('profiles').delete().eq('id', target.id);
+          if (error) Alert.alert('エラー', '削除に失敗しました');
+          else await fetchUsers();
+        },
+      },
+    ]);
   };
 
   if (loading) return <LoadingOverlay />;
@@ -154,7 +256,7 @@ export default function UserManagementScreen() {
     <View style={styles.container}>
       <FlatList
         data={users}
-        keyExtractor={item => item.id}
+        keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => {
           setRefreshing(true); await fetchUsers(); setRefreshing(false);
@@ -162,7 +264,7 @@ export default function UserManagementScreen() {
         ListHeaderComponent={
           <View style={styles.header}>
             <Text style={styles.headerTitle}>全メンバー（{users.length}名）</Text>
-            <TouchableOpacity style={styles.addBtn} onPress={() => setAddVisible(true)}>
+            <TouchableOpacity style={styles.addBtn} onPress={openAddModal} activeOpacity={0.8}>
               <Text style={styles.addBtnText}>＋ メンバーを追加</Text>
             </TouchableOpacity>
           </View>
@@ -170,9 +272,12 @@ export default function UserManagementScreen() {
         renderItem={({ item }) => (
           <Card style={styles.userCard}>
             <View style={styles.userRow}>
+              {/* アバター */}
               <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{item.full_name[0] ?? '?'}</Text>
+                <Text style={styles.avatarText}>{item.full_name?.[0] ?? '?'}</Text>
               </View>
+
+              {/* ユーザー情報 */}
               <View style={styles.userInfo}>
                 <View style={styles.userNameRow}>
                   <Text style={styles.userName}>{item.full_name}</Text>
@@ -181,8 +286,40 @@ export default function UserManagementScreen() {
                   )}
                 </View>
                 <Text style={styles.userEmail}>{item.email}</Text>
-                <Badge role={item.role} />
+                <View style={styles.badgeRow}>
+                  <Badge role={item.role} />
+                  <TouchableOpacity
+                    style={[
+                      styles.deptChip,
+                      item.department ? styles.deptChipActive : styles.deptChipEmpty,
+                    ]}
+                    onPress={() => toggleDepartment(item)}
+                    disabled={updatingDeptId === item.id}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[
+                      styles.deptChipText,
+                      item.department ? styles.deptChipTextActive : styles.deptChipTextEmpty,
+                    ]}>
+                      {updatingDeptId === item.id ? '更新中…' : (item.department ?? '事業部未設定')}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* メール送信ボタン */}
+                <TouchableOpacity
+                  style={[styles.mailBtn, sendingEmailId === item.id && styles.mailBtnDisabled]}
+                  onPress={() => sendLoginEmail(item)}
+                  disabled={sendingEmailId === item.id}
+                  activeOpacity={0.75}
+                >
+                  <Text style={styles.mailBtnText}>
+                    {sendingEmailId === item.id ? '送信中…' : '✉ メール送信'}
+                  </Text>
+                </TouchableOpacity>
               </View>
+
+              {/* 編集・削除ボタン */}
               <View style={styles.actionBtns}>
                 <TouchableOpacity style={styles.editBtn} onPress={() => openEdit(item)}>
                   <Text style={styles.editBtnText}>編集</Text>
@@ -198,93 +335,156 @@ export default function UserManagementScreen() {
         )}
       />
 
-      {/* メンバー追加モーダル */}
-      <Modal visible={addVisible} transparent animationType="slide">
-        <View style={styles.overlay}>
-          <View style={styles.sheet}>
-            <View style={styles.sheetHeader}>
-              <TouchableOpacity onPress={() => setAddVisible(false)} style={styles.closeBtn}>
-                <Text style={styles.closeBtnText}>✕</Text>
-              </TouchableOpacity>
-              <Text style={styles.sheetTitle}>メンバーを追加</Text>
-              <TouchableOpacity onPress={handleAdd} style={styles.saveBtn} disabled={saving}>
-                {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveBtnText}>追加</Text>}
-              </TouchableOpacity>
-            </View>
-            <ScrollView contentContainerStyle={styles.sheetBody} keyboardShouldPersistTaps="handled">
-              <Text style={styles.label}>名前 <Text style={styles.req}>必須</Text></Text>
-              <TextInput style={styles.input} value={form.full_name} onChangeText={v => setForm(f => ({ ...f, full_name: v }))} placeholder="例：山田 太郎" />
-              <Text style={styles.label}>メールアドレス <Text style={styles.req}>必須</Text></Text>
-              <TextInput style={styles.input} value={form.email} onChangeText={v => setForm(f => ({ ...f, email: v }))} placeholder="example@email.com" keyboardType="email-address" autoCapitalize="none" />
-              <Text style={styles.label}>パスワード <Text style={styles.req}>必須（6文字以上）</Text></Text>
-              <TextInput style={styles.input} value={form.password} onChangeText={v => setForm(f => ({ ...f, password: v }))} placeholder="6文字以上" secureTextEntry />
-              <Text style={styles.label}>権限</Text>
-              <View style={styles.roleRow}>
-                {ROLES.map(r => (
-                  <TouchableOpacity key={r}
-                    style={[styles.roleChip, form.role === r && styles.roleChipActive]}
-                    onPress={() => setForm(f => ({ ...f, role: r }))}>
-                    <Text style={[styles.roleChipText, form.role === r && styles.roleChipTextActive]}>{ROLE_NAMES[r]}</Text>
+      {/* ---- メンバー追加モーダル ---- */}
+      <Modal visible={addModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modal}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <Text style={styles.modalTitle}>メンバーを追加</Text>
+              <Text style={styles.modalSubtitle}>入力した情報でアカウントを作成します。</Text>
+
+              <Text style={styles.label}>メールアドレス <Text style={styles.required}>*</Text></Text>
+              <TextInput
+                style={styles.input}
+                value={addEmail}
+                onChangeText={setAddEmail}
+                placeholder="example@company.com"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+
+              <Text style={styles.label}>パスワード <Text style={styles.required}>*</Text></Text>
+              <TextInput
+                style={styles.input}
+                value={addPassword}
+                onChangeText={setAddPassword}
+                placeholder="6文字以上"
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+
+              <Text style={styles.label}>氏名 <Text style={styles.required}>*</Text></Text>
+              <TextInput
+                style={styles.input}
+                value={addName}
+                onChangeText={setAddName}
+                placeholder="山田 太郎"
+              />
+
+              <Text style={styles.label}>役割</Text>
+              <View style={styles.roleGrid}>
+                {INVITE_ROLES.map((r) => (
+                  <TouchableOpacity
+                    key={r}
+                    style={[styles.roleOption, addRole === r && styles.roleSelected]}
+                    onPress={() => setAddRole(r)}
+                  >
+                    <Text style={[styles.roleOptionText, addRole === r && styles.roleSelectedText]}>
+                      {ROLE_LABEL[r]}
+                    </Text>
                   </TouchableOpacity>
                 ))}
               </View>
-              <View style={styles.note}>
-                <Text style={styles.noteText}>追加後、そのメールアドレスとパスワードでログインできます。</Text>
+
+              <Text style={styles.label}>事業部</Text>
+              <View style={styles.roleGrid}>
+                {DEPARTMENTS.map((d) => (
+                  <TouchableOpacity
+                    key={d}
+                    style={[styles.deptOption, addDepartment === d && styles.deptOptionSelected]}
+                    onPress={() => setAddDepartment(addDepartment === d ? null : d)}
+                  >
+                    <Text style={[styles.deptOptionText, addDepartment === d && styles.deptOptionSelectedText]}>
+                      {d}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
+
+              <Button
+                title="追加する"
+                onPress={addMember}
+                loading={adding}
+                fullWidth
+                style={styles.modalBtn}
+              />
+              <Button
+                title="キャンセル"
+                onPress={() => setAddModalVisible(false)}
+                variant="ghost"
+                fullWidth
+              />
             </ScrollView>
           </View>
         </View>
       </Modal>
 
-      {/* メンバー編集モーダル */}
-      <Modal visible={!!editTarget} transparent animationType="slide">
-        <View style={styles.overlay}>
-          <View style={styles.sheet}>
-            <View style={styles.sheetHeader}>
-              <TouchableOpacity onPress={() => setEditTarget(null)} style={styles.closeBtn}>
-                <Text style={styles.closeBtnText}>✕</Text>
-              </TouchableOpacity>
-              <Text style={styles.sheetTitle}>メンバーを編集</Text>
-              <TouchableOpacity onPress={handleEdit} style={styles.saveBtn} disabled={editSaving}>
-                {editSaving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveBtnText}>保存</Text>}
+      {/* ---- 編集モーダル ---- */}
+      <Modal visible={!!editTarget} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modal}>
+            <Text style={styles.modalTitle}>メンバー情報を編集</Text>
+
+            <Text style={styles.label}>氏名</Text>
+            <TextInput
+              style={styles.input}
+              value={editName}
+              onChangeText={setEditName}
+              placeholder="氏名"
+            />
+
+            <Text style={styles.label}>メールアドレス</Text>
+            <TextInput
+              style={styles.input}
+              value={editEmail}
+              onChangeText={setEditEmail}
+              placeholder="メールアドレス"
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+
+            <Text style={styles.label}>役割</Text>
+            <View style={styles.roleGrid}>
+              {INVITE_ROLES.map((r) => (
+                <TouchableOpacity
+                  key={r}
+                  style={[styles.roleOption, editRole === r && styles.roleSelected]}
+                  onPress={() => setEditRole(r)}
+                >
+                  <Text style={[styles.roleOptionText, editRole === r && styles.roleSelectedText]}>
+                    {ROLE_LABEL[r]}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.label}>事業部</Text>
+            <View style={styles.roleGrid}>
+              {DEPARTMENTS.map((d) => (
+                <TouchableOpacity
+                  key={d}
+                  style={[styles.deptOption, editDepartment === d && styles.deptOptionSelected]}
+                  onPress={() => setEditDepartment(d)}
+                >
+                  <Text style={[styles.deptOptionText, editDepartment === d && styles.deptOptionSelectedText]}>
+                    {d}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              <TouchableOpacity
+                style={[styles.deptOption, editDepartment === null && styles.deptOptionSelected]}
+                onPress={() => setEditDepartment(null)}
+              >
+                <Text style={[styles.deptOptionText, editDepartment === null && styles.deptOptionSelectedText]}>
+                  未設定
+                </Text>
               </TouchableOpacity>
             </View>
-            <ScrollView contentContainerStyle={styles.sheetBody} keyboardShouldPersistTaps="handled">
-              <Text style={styles.label}>名前 <Text style={styles.req}>必須</Text></Text>
-              <TextInput
-                style={styles.input}
-                value={editForm.full_name}
-                onChangeText={v => setEditForm(f => ({ ...f, full_name: v }))}
-                placeholder="例：山田 太郎"
-              />
-              <Text style={styles.label}>メールアドレス</Text>
-              <TextInput
-                style={styles.input}
-                value={editForm.email}
-                onChangeText={v => setEditForm(f => ({ ...f, email: v }))}
-                placeholder="example@email.com"
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-              <Text style={styles.label}>新しいパスワード <Text style={styles.optional}>（変更する場合のみ）</Text></Text>
-              <TextInput
-                style={styles.input}
-                value={editForm.newPassword}
-                onChangeText={v => setEditForm(f => ({ ...f, newPassword: v }))}
-                placeholder="6文字以上（空欄なら変更なし）"
-                secureTextEntry
-              />
-              <Text style={styles.label}>権限</Text>
-              <View style={styles.roleRow}>
-                {ROLES.map(r => (
-                  <TouchableOpacity key={r}
-                    style={[styles.roleChip, editForm.role === r && styles.roleChipActive]}
-                    onPress={() => setEditForm(f => ({ ...f, role: r }))}>
-                    <Text style={[styles.roleChipText, editForm.role === r && styles.roleChipTextActive]}>{ROLE_NAMES[r]}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </ScrollView>
+
+            <Button title="保存" onPress={saveEdit} loading={saving} fullWidth style={styles.modalBtn} />
+            <Button title="キャンセル" onPress={() => setEditTarget(null)} variant="ghost" fullWidth />
           </View>
         </View>
       </Modal>
@@ -294,14 +494,28 @@ export default function UserManagementScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f9fafb' },
-  list: { padding: 16, paddingBottom: 40, maxWidth: 760, width: '100%', alignSelf: 'center' as any },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
-  headerTitle: { fontSize: 17, fontWeight: '700', color: '#374151' },
-  addBtn: { backgroundColor: '#059669', paddingHorizontal: 16, paddingVertical: 9, borderRadius: 20 },
-  addBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  list: {
+    padding: 16, paddingBottom: 40,
+    ...(Platform.OS === 'web' ? { maxWidth: 760, width: '100%', alignSelf: 'center' } as any : {}),
+  },
+  header: { marginBottom: 16 },
+  headerTitle: { fontSize: 17, fontWeight: '700', color: '#374151', marginBottom: 12 },
+  addBtn: {
+    backgroundColor: PRIMARY,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+  },
+  addBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   userCard: { marginBottom: 10 },
-  userRow: { flexDirection: 'row', alignItems: 'center' },
-  avatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#1a56db', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  userRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  avatar: {
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: PRIMARY,
+    justifyContent: 'center', alignItems: 'center', marginRight: 12,
+    flexShrink: 0,
+  },
   avatarText: { color: '#fff', fontSize: 20, fontWeight: '700' },
   userInfo: { flex: 1, gap: 4 },
   userNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -309,33 +523,63 @@ const styles = StyleSheet.create({
   meBadge: { backgroundColor: '#e0f2fe', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 10 },
   meBadgeText: { fontSize: 11, fontWeight: '700', color: '#0369a1' },
   userEmail: { fontSize: 13, color: '#9ca3af' },
-  actionBtns: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  editBtn: { paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#e0f2fe', borderRadius: 8 },
-  editBtnText: { color: '#1a56db', fontSize: 13, fontWeight: '700' },
-  deleteBtn: { paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#fde8e8', borderRadius: 8 },
+  badgeRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  deptChip: {
+    paddingHorizontal: 10, paddingVertical: 4,
+    borderRadius: 20, borderWidth: 1.5,
+  },
+  deptChipActive: { borderColor: PRIMARY, backgroundColor: '#e1effe' },
+  deptChipEmpty: { borderColor: '#d1d5db', backgroundColor: '#f3f4f6' },
+  deptChipText: { fontSize: 12, fontWeight: '600' },
+  deptChipTextActive: { color: PRIMARY },
+  deptChipTextEmpty: { color: '#9ca3af' },
+  // メール送信ボタン
+  mailBtn: {
+    flexDirection: 'row',
+    alignSelf: 'flex-start',
+    marginTop: 6,
+    backgroundColor: '#e1effe',
+    borderWidth: 1.5,
+    borderColor: PRIMARY,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  mailBtnDisabled: { opacity: 0.5 },
+  mailBtnText: { color: PRIMARY, fontSize: 12, fontWeight: '700' },
+  actionBtns: { flexDirection: 'column', gap: 6, marginLeft: 8 },
+  editBtn: { paddingHorizontal: 12, paddingVertical: 7, backgroundColor: '#eff6ff', borderRadius: 8 },
+  editBtnText: { color: PRIMARY, fontSize: 13, fontWeight: '700' },
+  deleteBtn: { paddingHorizontal: 12, paddingVertical: 7, backgroundColor: '#fde8e8', borderRadius: 8 },
   deleteBtnText: { color: '#c81e1e', fontSize: 13, fontWeight: '700' },
-
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end', ...(Platform.OS === 'web' ? { alignItems: 'center' } as any : {}) },
-  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '90%', ...(Platform.OS === 'web' ? { borderRadius: 20, width: '100%', maxWidth: 500, marginBottom: 0 } as any : {}) },
-  sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
-  closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center' },
-  closeBtnText: { fontSize: 14, color: '#64748b', fontWeight: '700' },
-  sheetTitle: { fontSize: 17, fontWeight: '800', color: '#0f172a' },
-  saveBtn: { backgroundColor: '#059669', paddingHorizontal: 18, paddingVertical: 8, borderRadius: 10 },
-  saveBtnText: { color: '#fff', fontSize: 14, fontWeight: '800' },
-  sheetBody: { padding: 20, paddingBottom: 48 },
-  label: { fontSize: 13, fontWeight: '700', color: '#374151', marginBottom: 6, marginTop: 16 },
-  req: { color: '#ef4444', fontWeight: '500' },
-  optional: { color: '#94a3b8', fontWeight: '400', fontSize: 12 },
-  input: { borderWidth: 1.5, borderColor: '#e2e8f0', borderRadius: 12, padding: 13, fontSize: 15, color: '#0f172a', backgroundColor: '#fafafa' },
-  roleRow: { flexDirection: 'row', gap: 10 },
-  roleChip: { flex: 1, paddingVertical: 12, borderRadius: 12, borderWidth: 1.5, borderColor: '#e2e8f0', alignItems: 'center', backgroundColor: '#fff' },
-  roleChipActive: { backgroundColor: '#059669', borderColor: '#059669' },
-  roleChipText: { fontSize: 14, fontWeight: '600', color: '#64748b' },
-  roleChipTextActive: { color: '#fff', fontWeight: '800' },
-  note: { marginTop: 24, backgroundColor: '#f0fdf4', borderRadius: 12, padding: 14 },
-  noteText: { fontSize: 13, color: '#166534', lineHeight: 20 },
-  emailDisplay: { backgroundColor: '#f8fafc', borderRadius: 12, padding: 14, marginTop: 8 },
-  emailLabel: { fontSize: 12, color: '#94a3b8', marginBottom: 4 },
-  emailValue: { fontSize: 15, fontWeight: '600', color: '#334155' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  modal: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    padding: 24, maxHeight: '90%',
+  },
+  modalTitle: { fontSize: 20, fontWeight: '800', color: '#111827', marginBottom: 8 },
+  modalSubtitle: { fontSize: 14, color: '#6b7280', marginBottom: 4 },
+  label: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 6, marginTop: 12 },
+  required: { color: '#e53e3e' },
+  input: {
+    borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8,
+    paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, backgroundColor: '#f9fafb',
+  },
+  roleGrid: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 8 },
+  roleOption: {
+    paddingHorizontal: 16, paddingVertical: 10,
+    borderRadius: 8, borderWidth: 1.5, borderColor: '#d1d5db', backgroundColor: '#f9fafb',
+  },
+  roleSelected: { borderColor: PRIMARY, backgroundColor: '#eff6ff' },
+  roleOptionText: { fontSize: 14, fontWeight: '600', color: '#6b7280' },
+  roleSelectedText: { color: PRIMARY },
+  deptOption: {
+    paddingHorizontal: 16, paddingVertical: 10,
+    borderRadius: 8, borderWidth: 1.5, borderColor: '#d1d5db', backgroundColor: '#f9fafb',
+  },
+  deptOptionSelected: { borderColor: PRIMARY, backgroundColor: '#eff6ff' },
+  deptOptionText: { fontSize: 14, fontWeight: '600', color: '#6b7280' },
+  deptOptionSelectedText: { color: PRIMARY },
+  modalBtn: { marginBottom: 10, marginTop: 16 },
 });

@@ -4,6 +4,10 @@
 
 export type UserRole = 'admin' | 'employee' | 'partner';
 
+export type Department = '電気工事事業部' | '発電機事業部' | '経理部';
+
+export const DEPARTMENTS: Department[] = ['電気工事事業部', '発電機事業部', '経理部'];
+
 export type ProjectStatus = 'inquiry' | 'planning' | 'active' | 'completed' | 'paused';
 
 export type InvitationStatus = 'pending' | 'accepted' | 'expired';
@@ -22,6 +26,7 @@ export interface Profile {
   full_name: string;
   role: UserRole;
   company_id: string | null;
+  department: Department | null;
   created_at: string;
 }
 
